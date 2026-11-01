@@ -1,5 +1,6 @@
 import { Chess } from '../vendor/chess.js';
-import { Engine, blunderChance, fallbackMove } from './engine.js';
+import { Engine, fallbackMove } from './engine.js';
+import { parseTime } from './time.js';
 import * as sfx from './sound.js';
 
 const FILES = 'abcdefgh';
@@ -9,12 +10,6 @@ const other = (c) => (c === 'w' ? 'b' : 'w');
 
 let sharedEngine = null;
 const getEngine = () => (sharedEngine ||= new Engine());
-
-export function parseTime(str) {
-  if (str === 'Unlimited') return { base: 0, inc: 0 };
-  const [m, i] = str.split('+').map(Number);
-  return { base: m * 60000, inc: (i || 0) * 1000 };
-}
 
 export function formatClock(ms) {
   ms = Math.max(0, ms);
@@ -78,6 +73,7 @@ export class Game {
     this.build();
     this.render();
     this.timer = setInterval(() => this.tick(), 100);
+    sfx.play('start', this.settings);
     if (cfg.mode === 'bot') {
       getEngine().newGame();
       getEngine().load().catch(() => {});   // start loading right away
@@ -446,7 +442,9 @@ export class Game {
     this.render();
     if (animate) this.animateLast(mv.from);
     if (!this.over) {
-      sfx.play(this.chess.inCheck() ? 'check' : mv.captured ? 'capture' : 'move', this.settings.sound);
+      const kind = this.chess.inCheck() ? 'check' : mv.promotion ? 'promote'
+        : mv.captured ? 'capture' : (mv.flags.includes('k') || mv.flags.includes('q')) ? 'castle' : 'move';
+      sfx.play(kind, this.settings);
       this.maybeBotMove();
     }
     return true;
@@ -470,7 +468,9 @@ export class Game {
     this.closePromotion();
     if (this.cfg.mode === 'bot') getEngine().stop();
     clearInterval(this.timer);
-    sfx.play('end', this.settings.sound);
+    const endKind = winner === null ? 'draw'
+      : this.cfg.mode === 'bot' ? (winner === this.humanColor ? 'win' : 'lose') : 'win';
+    sfx.play(endKind, this.settings);
     const title = winner === null ? 'Draw' : winner === 'w' ? 'White won' : 'Black won';
     this.resultEl.hidden = false;
     this.resultEl.innerHTML = `<strong>${title}</strong><span>${reason}</span>
@@ -561,22 +561,17 @@ export class Game {
     const remaining = this.clocks[other(this.humanColor)];
     let movetime = this.base ? Math.min(2500, Math.max(250, remaining / 35 + this.inc * 0.6)) : 1200;
     if (elo < 1800) movetime = Math.min(movetime, 400 + elo / 3);
+    if (elo < 1320) movetime = 0;   // low-Elo search is depth-limited and instant
 
     let uci;
-    const legal = this.chess.moves({ verbose: true });
-    if (Math.random() < blunderChance(elo) && legal.length > 1) {
-      const m = legal[Math.floor(Math.random() * legal.length)];
-      uci = m.from + m.to + (m.promotion || '');
-    } else {
-      try {
-        uci = await getEngine().bestMove(this.chess.fen(), { elo, movetime });
-      } catch (err) {
-        if (!this.usingFallback) {
-          this.usingFallback = true;
-          this.toast('Stockfish couldn’t start here, so the bot is using a simpler brain. Open the site over http(s) to use Stockfish.');
-        }
-        uci = fallbackMove(this.chess);
+    try {
+      uci = await getEngine().bestMove(this.chess.fen(), { elo, movetime, legalCount: this.chess.moves().length });
+    } catch (err) {
+      if (!this.usingFallback) {
+        this.usingFallback = true;
+        this.toast('Stockfish couldn’t start here, so the bot is using a simpler brain. Open the site over http(s) to use Stockfish.');
       }
+      uci = fallbackMove(this.chess);
     }
     // Small pause so the bot never feels instant.
     const wait = 450 - (performance.now() - t0);

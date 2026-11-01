@@ -1,5 +1,8 @@
 import { Game } from './game.js';
 import { ELO_MIN, ELO_MAX } from './engine.js';
+import { SITE_THEMES, BOARD_THEMES, applyThemes } from './themes.js';
+import { MINUTES, INCS, PRESETS, timeLabel, category, nearestIndex, minLabel } from './time.js';
+import * as sfx from './sound.js';
 
 // ---------- settings ----------
 const DEFAULTS = {
@@ -9,18 +12,23 @@ const DEFAULTS = {
   lastMove: true,
   animate: true,
   autoFlip: false,
-  theme: 'violet',
+  volume: 70,
+  accent: 'purple',
+  board: 'violet',
 };
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('boardly:' + k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('boardly:' + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
+if (settings.theme) {            // v1.0 stored the board colors as "theme"
+  if (BOARD_THEMES.some((b) => b.id === settings.theme)) settings.board = settings.theme;
+  delete settings.theme;
+}
 const saveSettings = () => store.set('settings', settings);
-document.documentElement.dataset.theme = settings.theme;
+applyThemes(settings);
 
 // ---------- play setup state ----------
-const TIMES = ['1+0', '3+0', '3+2', '5+0', '10+0', '15+10', '30+0', 'Unlimited'];
 const setup = { mode: 'bot', gamemode: 'Classic', time: '15+10', elo: 1800, color: 'w', ...store.get('setup', {}) };
 const saveSetup = () => store.set('setup', setup);
 
@@ -91,9 +99,9 @@ function play() {
           <label class="field"><span>Gamemode</span>
             <span class="select"><select id="f-mode">${opt(['Classic'], setup.gamemode)}</select></span>
           </label>
-          <label class="field right"><span>Time</span>
-            <span class="select"><select id="f-time">${opt(TIMES, setup.time)}</select></span>
-          </label>
+          <div class="field right"><span id="lbl-time">Time</span>
+            <span class="select"><button type="button" class="selbtn" id="f-time" aria-labelledby="lbl-time f-time" aria-haspopup="dialog">${timeLabel(setup.time)}</button></span>
+          </div>
         </div>
         ${isBot ? `
         <div class="diff">
@@ -115,7 +123,10 @@ function play() {
 
   view.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => { setup.mode = b.dataset.mode; saveSetup(); play(); }));
   view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); });
-  view.querySelector('#f-time').addEventListener('change', (e) => { setup.time = e.target.value; saveSetup(); });
+  view.querySelector('#f-time').addEventListener('click', () => timePopup((t) => {
+    setup.time = t; saveSetup();
+    view.querySelector('#f-time').textContent = timeLabel(t);
+  }));
   const elo = view.querySelector('#f-elo');
   if (elo) {
     elo.addEventListener('input', () => {
@@ -158,10 +169,73 @@ function startGame() {
   route();
 }
 
+// ---------- Time popup ----------
+function timePopup(onSave) {
+  const unl = setup.time === 'Unlimited';
+  const [m0, i0] = unl ? [15, 10] : setup.time.split('+').map(Number);
+  let mi = nearestIndex(MINUTES, m0);
+  let ii = nearestIndex(INCS, i0 || 0);
+  let unlimited = unl;
+
+  const el = document.createElement('div');
+  el.className = 'modal';
+  el.innerHTML = `
+    <div class="modal-card tc" role="dialog" aria-modal="true" aria-label="Time control">
+      <h3>Time control</h3>
+      <div class="tc-read"><strong id="tc-big"></strong><span id="tc-cat"></span></div>
+      <div class="chips" role="group" aria-label="Quick picks">
+        ${PRESETS.map((p) => `<button type="button" class="chip" data-p="${p}">${timeLabel(p)}</button>`).join('')}
+      </div>
+      <div class="tc-sliders">
+        <div class="tc-row"><label for="tc-min">Total time</label><output id="tc-min-out"></output></div>
+        <div class="range plain"><input id="tc-min" type="range" min="0" max="${MINUTES.length - 1}" step="1" value="${mi}"></div>
+        <div class="tc-row"><label for="tc-inc">Increment per move</label><output id="tc-inc-out"></output></div>
+        <div class="range plain"><input id="tc-inc" type="range" min="0" max="${INCS.length - 1}" step="1" value="${ii}"></div>
+      </div>
+      <label class="tc-unl"><span>No clock<small>Play without a time limit</small></span>
+        <input class="switch" id="tc-unl" type="checkbox" role="switch"${unlimited ? ' checked' : ''}></label>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-a="cancel">Cancel</button>
+        <button type="button" class="btn primary" data-a="save">Save</button>
+      </div>
+    </div>`;
+  const $ = (s) => el.querySelector(s);
+  const current = () => (unlimited ? 'Unlimited' : `${MINUTES[mi]}+${INCS[ii]}`);
+  const paint = () => {
+    const t = current();
+    $('#tc-big').textContent = unlimited ? 'Unlimited' : `${minLabel(MINUTES[mi])} + ${INCS[ii]}`;
+    $('#tc-cat').textContent = category(t);
+    $('#tc-min-out').textContent = `${minLabel(MINUTES[mi])} ${MINUTES[mi] <= 1 ? 'minute' : 'minutes'}`;
+    $('#tc-inc-out').textContent = `${INCS[ii]} ${INCS[ii] === 1 ? 'second' : 'seconds'}`;
+    $('#tc-min').parentElement.style.setProperty('--pct', mi / (MINUTES.length - 1));
+    $('#tc-inc').parentElement.style.setProperty('--pct', ii / (INCS.length - 1));
+    $('.tc-sliders').classList.toggle('off', unlimited);
+    $('#tc-min').disabled = $('#tc-inc').disabled = unlimited;
+    el.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', !unlimited && c.dataset.p === t));
+  };
+  const close = () => { el.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  $('#tc-min').addEventListener('input', (e) => { mi = +e.target.value; paint(); });
+  $('#tc-inc').addEventListener('input', (e) => { ii = +e.target.value; paint(); });
+  $('#tc-unl').addEventListener('change', (e) => { unlimited = e.target.checked; paint(); });
+  el.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+    const [m, i] = c.dataset.p.split('+').map(Number);
+    mi = nearestIndex(MINUTES, m); ii = nearestIndex(INCS, i); unlimited = false;
+    $('#tc-min').value = mi; $('#tc-inc').value = ii; $('#tc-unl').checked = false;
+    paint();
+  }));
+  $('[data-a=cancel]').addEventListener('click', close);
+  $('[data-a=save]').addEventListener('click', () => { onSave(current()); close(); });
+  el.addEventListener('pointerdown', (e) => { if (e.target === el) close(); });
+  paint();
+  document.body.append(el);
+  $('[data-a=save]').focus();
+}
+
 // ---------- Settings ----------
 function settingsPage() {
   const toggles = [
-    ['sound', 'Sound effects', 'Play a small sound for moves, captures and checks.'],
     ['hints', 'Show legal moves', 'Mark where the selected piece can go.'],
     ['lastMove', 'Highlight last move', 'Tint the squares of the most recent move.'],
     ['animate', 'Animate pieces', 'Slide pieces across the board.'],
@@ -175,25 +249,56 @@ function settingsPage() {
     <div class="settings">
       <label class="srow stack"><span class="s-title">Your name</span>
         <input class="text" id="s-name" maxlength="20" value="${esc(settings.name)}" placeholder="player" autocomplete="nickname"></label>
-      <div class="srow stack"><span class="s-title">Board colors</span>
-        <div class="themes" role="radiogroup" aria-label="Board colors">
-          ${[['violet', 'Violet'], ['lilac', 'Lilac'], ['slate', 'Slate']].map(([k, l]) => `
-            <button class="theme t-${k}" role="radio" aria-checked="${settings.theme === k}" data-theme="${k}">
-              <span class="sw"><i></i><i></i><i></i><i></i></span>${l}</button>`).join('')}
+
+      <div class="srow stack"><span class="s-title">Site theme</span>
+        <span class="s-desc">Changes the main color across Boardly.</span>
+        <div class="swatches" id="site-themes" role="radiogroup" aria-label="Site theme">
+          ${SITE_THEMES.map((t) => `
+            <button class="swatch" role="radio" aria-checked="${settings.accent === t.id}" data-id="${t.id}" title="${t.name}">
+              <span class="dotc" style="background:linear-gradient(135deg, ${t.hi}, ${t.main} 60%, ${t.sel})"></span>${t.name}
+            </button>`).join('')}
         </div>
       </div>
+
+      <div class="srow stack"><span class="s-title">Board theme</span>
+        <span class="s-desc">Colors of the squares.</span>
+        <div class="swatches" id="board-themes" role="radiogroup" aria-label="Board theme">
+          ${BOARD_THEMES.map((t) => `
+            <button class="swatch" role="radio" aria-checked="${settings.board === t.id}" data-id="${t.id}" title="${t.name}">
+              <span class="sw" style="--l:${t.l};--d:${t.d}"><i></i><i></i><i></i><i></i></span>${t.name}
+            </button>`).join('')}
+        </div>
+      </div>
+
+      <label class="srow"><span><span class="s-title">Sound effects</span><span class="s-desc">Piece sounds, checks and game results.</span></span>
+        <input class="switch" type="checkbox" role="switch" data-k="sound"${settings.sound ? ' checked' : ''}></label>
+      <div class="srow stack"><label class="s-title" for="s-vol">Volume</label>
+        <div class="range plain" style="--pct:${settings.volume / 100}"><input id="s-vol" type="range" min="0" max="100" step="5" value="${settings.volume}"></div>
+      </div>
+
       ${toggles.map(([k, t, d]) => `
         <label class="srow"><span><span class="s-title">${t}</span><span class="s-desc">${d}</span></span>
           <input class="switch" type="checkbox" role="switch" data-k="${k}"${settings[k] ? ' checked' : ''}></label>`).join('')}
+
+      <p class="foot">Boardly 2026. Made by Claude. v1.1</p>
     </div>`;
+
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });
-  view.querySelectorAll('.switch').forEach((s) => s.addEventListener('change', () => { settings[s.dataset.k] = s.checked; saveSettings(); game?.render(); }));
-  view.querySelectorAll('.theme').forEach((b) => b.addEventListener('click', () => {
-    settings.theme = b.dataset.theme;
-    document.documentElement.dataset.theme = settings.theme;
-    saveSettings();
-    view.querySelectorAll('.theme').forEach((x) => x.setAttribute('aria-checked', x === b));
+  view.querySelectorAll('.switch').forEach((s) => s.addEventListener('change', () => {
+    settings[s.dataset.k] = s.checked; saveSettings(); game?.render();
+    if (s.dataset.k === 'sound' && s.checked) sfx.play('move', settings);
   }));
+  const vol = view.querySelector('#s-vol');
+  vol.addEventListener('input', () => { settings.volume = +vol.value; vol.parentElement.style.setProperty('--pct', vol.value / 100); saveSettings(); });
+  vol.addEventListener('change', () => sfx.play('capture', settings));
+  const pick = (groupId, key) => view.querySelectorAll(`#${groupId} .swatch`).forEach((b) => b.addEventListener('click', () => {
+    settings[key] = b.dataset.id;
+    applyThemes(settings);
+    saveSettings();
+    view.querySelectorAll(`#${groupId} .swatch`).forEach((x) => x.setAttribute('aria-checked', x === b));
+  }));
+  pick('site-themes', 'accent');
+  pick('board-themes', 'board');
 }
 
 route();
