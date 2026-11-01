@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="violet">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Boardly</title>
+  <meta name="description" content="Boardly: play chess with a friend on one screen, or against a Stockfish bot.">
+  <meta name="theme-color" content="#1d1d20">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235c14ee'/%3E%3Cpath fill='%23cfd9ff' d='M12 12h20v20H12zM32 32h20v20H32z'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar" aria-label="Main">
+      <a class="logo" href="#/home">BOARDLY</a>
+      <ul>
+        <li><a href="#/home" data-route="home"><span>Home</span></a></li>
+        <li><a href="#/play" data-route="play"><span>Play</span><i class="live" hidden title="Game in progress"></i></a></li>
+        <li><span class="nav-disabled" aria-disabled="true">Create <small>Soon</small></span></li>
+        <li><a href="#/settings" data-route="settings"><span>Settings</span></a></li>
+      </ul>
+    </nav>
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+  <noscript>Boardly needs JavaScript to run.</noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
