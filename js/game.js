@@ -1,11 +1,46 @@
 import { Chess } from '../vendor/chess.js';
+import { CustomChess, FILES as CFILES } from './rules.js';
 import { Engine, fallbackMove } from './engine.js';
 import { parseTime } from './time.js';
+import { modal, toast } from './ui.js';
 import * as sfx from './sound.js';
 
-const FILES = 'abcdefgh';
 const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
-const piece = (color, type) => `pieces/${color}${type.toUpperCase()}.svg`;
+const NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+const CLASSIC_GEO = {
+  w: 8, h: 8, cells: Array.from({ length: 8 }, () => Array(8).fill(true)), shaped: false,
+  imgOf: (c, t) => `pieces/${c}${t.toUpperCase()}.svg`,
+  valueOf: (t) => VALUE[t] ?? 0,
+  nameOf: (t) => NAMES[t],
+  isRoyal: (t) => t === 'k',
+};
+
+// Bot for custom boards runs in a background worker so the page never freezes.
+let botWorker = null, botFailed = false, botSeq = 0;
+const botPending = new Map();
+async function runCustomBot(state, opts) {
+  if (!botFailed) {
+    try {
+      if (!botWorker) {
+        botWorker = new Worker(new URL('./botworker.js', import.meta.url), { type: 'module' });
+        botWorker.onmessage = (e) => {
+          const p = botPending.get(e.data.id);
+          if (!p) return;
+          botPending.delete(e.data.id);
+          if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.move);
+        };
+        botWorker.onerror = () => { botFailed = true; botPending.forEach((p) => p.reject(new Error('worker'))); botPending.clear(); };
+      }
+      return await new Promise((resolve, reject) => {
+        const id = ++botSeq;
+        botPending.set(id, { resolve, reject });
+        botWorker.postMessage({ id, state, opts });
+      });
+    } catch { botFailed = true; }
+  }
+  const { chooseMove } = await import('./custombot.js');
+  return chooseMove(state, { ...opts, timeMs: Math.min(opts.timeMs, 600) });
+}
 const other = (c) => (c === 'w' ? 'b' : 'w');
 
 let sharedEngine = null;
@@ -24,27 +59,6 @@ export function formatClock(ms) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function modal({ title, text, actions }) {
-  const el = document.createElement('div');
-  el.className = 'modal';
-  el.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-label="${title}">
-    <h3>${title}</h3>${text ? `<p>${text}</p>` : ''}<div class="modal-actions"></div></div>`;
-  const box = el.querySelector('.modal-actions');
-  const close = () => { el.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
-  document.addEventListener('keydown', onKey);
-  actions.forEach((a) => {
-    const b = document.createElement('button');
-    b.className = `btn ${a.kind || 'ghost'}`;
-    b.textContent = a.label;
-    b.addEventListener('click', () => { close(); a.run?.(); });
-    box.append(b);
-  });
-  el.addEventListener('pointerdown', (e) => { if (e.target === el) close(); });
-  document.body.append(el);
-  box.querySelector('button')?.focus();
-}
-
 export class Game {
   /**
    * cfg: { mode: 'bot'|'friend', time: '15+10', elo, color: 'w'|'b' }
@@ -55,7 +69,9 @@ export class Game {
     this.cfg = cfg;
     this.settings = settings;
     this.hooks = hooks;
-    this.chess = new Chess();
+    this.custom = !!cfg.variant;
+    this.chess = this.custom ? new CustomChess(cfg.variant) : new Chess();
+    this.geo = this.custom ? this.chess.geometry() : CLASSIC_GEO;
     const { base, inc } = parseTime(cfg.time);
     this.base = base;
     this.inc = inc;
@@ -74,11 +90,11 @@ export class Game {
     this.render();
     this.timer = setInterval(() => this.tick(), 100);
     sfx.play('start', this.settings);
-    if (cfg.mode === 'bot') {
+    if (cfg.mode === 'bot' && !this.custom) {
       getEngine().newGame();
       getEngine().load().catch(() => {});   // start loading right away
       this.maybeBotMove();
-    }
+    } else if (cfg.mode === 'bot') this.maybeBotMove();
   }
 
   get active() { return !this.over; }
@@ -118,17 +134,31 @@ export class Game {
   }
 
   buildBoard() {
+    const { w, h, cells } = this.geo;
+    const m = Math.max(w, h);
+    this.root.style.setProperty('--fw', w / m);
+    this.root.style.setProperty('--fh', h / m);
+    this.boardEl.style.gridTemplateColumns = `repeat(${w}, 1fr)`;
+    this.boardEl.style.gridTemplateRows = `repeat(${h}, 1fr)`;
+    this.boardEl.classList.toggle('shaped', !!this.geo.shaped);
     this.boardEl.textContent = '';
     this.sq = {};
     const o = this.orientation;
-    for (let r = 0; r < 8; r++) {
-      for (let c = 0; c < 8; c++) {
-        const name = o === 'w' ? FILES[c] + (8 - r) : FILES[7 - c] + (r + 1);
+    const xy = (r, c) => (o === 'w' ? [c, r] : [w - 1 - c, h - 1 - r]);
+    // where to print rank / file labels (first square of a row, last square of a column)
+    const rankDone = new Set();
+    const fileAt = {};
+    for (let c = 0; c < w; c++) for (let r = h - 1; r >= 0; r--) { const [x, y] = xy(r, c); if (cells[y][x]) { fileAt[c] = r; break; } }
+    for (let r = 0; r < h; r++) {
+      for (let c = 0; c < w; c++) {
+        const [x, y] = xy(r, c);
         const el = document.createElement('div');
-        el.className = 'sq ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+        if (!cells[y][x]) { el.className = 'sq void'; this.boardEl.append(el); continue; }
+        const name = CFILES[x] + (h - y);
+        el.className = 'sq ' + ((x + (h - 1 - y)) % 2 === 0 ? 'dark' : 'light');
         el.dataset.sq = name;
-        if (c === 0) el.insertAdjacentHTML('beforeend', `<i class="coord rank">${name[1]}</i>`);
-        if (r === 7) el.insertAdjacentHTML('beforeend', `<i class="coord file">${name[0]}</i>`);
+        if (!rankDone.has(r)) { rankDone.add(r); el.insertAdjacentHTML('beforeend', `<i class="coord rank">${h - y}</i>`); }
+        if (fileAt[c] === r) el.insertAdjacentHTML('beforeend', `<i class="coord file">${CFILES[x]}</i>`);
         this.boardEl.append(el);
         this.sq[name] = el;
       }
@@ -169,10 +199,11 @@ export class Game {
     return color === this.chess.turn();
   }
 
-  kingSquare(color) {
-    const b = this.chess.board();
-    for (const row of b) for (const p of row) if (p && p.type === 'k' && p.color === color) return p.square;
-    return null;
+  checkSquares() {
+    if (!this.chess.inCheck()) return [];
+    if (this.custom) return this.chess.checkedSquares();
+    for (const row of this.chess.board()) for (const p of row) if (p && p.type === 'k' && p.color === this.chess.turn()) return [p.square];
+    return [];
   }
 
   flip() {
@@ -194,7 +225,7 @@ export class Game {
     const s = this.settings;
     const hist = this.chess.history({ verbose: true });
     const last = hist[hist.length - 1];
-    const checkSq = this.chess.inCheck() ? this.kingSquare(this.chess.turn()) : null;
+    const checkSet = new Set(this.checkSquares());
     const board = this.chess.board();
     const at = {};
     for (const row of board) for (const p of row) if (p) at[p.square] = p;
@@ -202,7 +233,7 @@ export class Game {
     for (const [name, el] of Object.entries(this.sq)) {
       el.classList.toggle('last', !!(s.lastMove && last && (last.from === name || last.to === name)));
       el.classList.toggle('sel', this.selected === name);
-      el.classList.toggle('check', checkSq === name);
+      el.classList.toggle('check', checkSet.has(name));
       const t = this.targets.get(name);
       el.classList.toggle('hint', !!(s.hints && t && !t.cap));
       el.classList.toggle('hint-cap', !!(s.hints && t && t.cap));
@@ -211,8 +242,8 @@ export class Game {
       if (p) {
         const img = new Image();
         img.className = 'pc';
-        img.src = piece(p.color, p.type);
-        img.alt = `${p.color === 'w' ? 'White' : 'Black'} ${{ p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' }[p.type]}`;
+        img.src = this.geo.imgOf(p.color, p.type);
+        img.alt = `${p.color === 'w' ? 'White' : 'Black'} ${this.geo.nameOf(p.type)}`;
         img.draggable = false;
         el.prepend(img);
       }
@@ -243,9 +274,9 @@ export class Game {
   captured() {
     const got = { w: [], b: [] };   // pieces each side has captured
     for (const m of this.chess.history({ verbose: true })) if (m.captured) got[m.color].push(m.captured);
-    const order = 'qrbnp';
-    for (const k of 'wb') got[k].sort((x, y) => order.indexOf(x) - order.indexOf(y));
-    const sum = (arr) => arr.reduce((t, p) => t + VALUE[p], 0);
+    const val = (t) => this.geo.valueOf(t);
+    for (const k of 'wb') got[k].sort((x, y) => val(y) - val(x));
+    const sum = (arr) => arr.reduce((t, p) => t + val(p), 0);
     return { got, diff: sum(got.w) - sum(got.b) };
   }
 
@@ -261,7 +292,7 @@ export class Game {
         ? (this.result.winner === null ? 'draw' : this.result.winner === side ? 'win' : 'lose')
         : '';
       const adv = side === 'w' ? cap.diff : -cap.diff;
-      const icons = cap.got[side].map((t) => `<img src="${piece(other(side), t)}" alt="">`).join('');
+      const icons = cap.got[side].map((t) => `<img src="${this.geo.imgOf(other(side), t)}" alt="">`).join('');
       row.innerHTML = `
         <div class="pbar side-${side} ${state}">
           <span class="pname">${info.name}${info.elo ? ` <span class="elo">(${info.elo})</span>` : ''}</span>
@@ -386,23 +417,25 @@ export class Game {
   tryMove(from, to, dragged = false) {
     const options = this.chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);
     if (!options.length) return;
-    if (options.length > 1) { this.askPromotion(from, to, options[0].color, dragged); return; }
-    this.play({ from, to }, !dragged);
+    if (options.length > 1) { this.askPromotion(from, to, options, dragged); return; }
+    this.play({ from, to, promotion: options[0].promotion }, !dragged);
   }
 
-  askPromotion(from, to, color, dragged) {
+  askPromotion(from, to, options, dragged) {
+    const color = options[0].color;
     this.promoPending = true;
     const el = this.promoEl;
     const col = this.sq[to].getBoundingClientRect();
     const wrap = this.boardEl.getBoundingClientRect();
     const size = col.width;
     const goesDown = (col.top - wrap.top) < wrap.height / 2;   // keep the picker on the board
+    const types = options.map((o) => o.promotion).sort((a, b) => this.geo.valueOf(b) - this.geo.valueOf(a));
+    if (!goesDown) types.reverse();
     el.hidden = false;
     el.style.width = size + 'px';
     el.style.left = col.left - wrap.left + 'px';
-    el.style.top = goesDown ? col.top - wrap.top + 'px' : col.top - wrap.top - size * 3 + 'px';
-    const types = goesDown ? ['q', 'n', 'r', 'b'] : ['b', 'r', 'n', 'q'];
-    el.innerHTML = types.map((t) => `<button data-t="${t}" aria-label="Promote to ${t}"><img src="${piece(color, t)}" alt=""></button>`).join('');
+    el.style.top = goesDown ? col.top - wrap.top + 'px' : col.top - wrap.top - size * (types.length - 1) + 'px';
+    el.innerHTML = types.map((t) => `<button data-t="${t}" aria-label="Promote to ${this.geo.nameOf(t)}"><img src="${this.geo.imgOf(color, t)}" alt=""></button>`).join('');
     el.onclick = (ev) => {
       const b = ev.target.closest('button');
       if (!b) return;
@@ -452,7 +485,7 @@ export class Game {
 
   checkEnd() {
     const c = this.chess;
-    if (c.isCheckmate()) this.finish(other(c.turn()), 'by checkmate');
+    if (c.isCheckmate()) this.finish(other(c.turn()), this.custom && c.annihilated() ? 'by capturing every piece' : 'by checkmate');
     else if (c.isStalemate()) this.finish(null, 'by stalemate');
     else if (c.isInsufficientMaterial()) this.finish(null, 'by insufficient material');
     else if (c.isThreefoldRepetition()) this.finish(null, 'by threefold repetition');
@@ -466,7 +499,7 @@ export class Game {
     this.token++;
     this.botThinking = false;
     this.closePromotion();
-    if (this.cfg.mode === 'bot') getEngine().stop();
+    if (this.cfg.mode === 'bot' && !this.custom) getEngine().stop();
     clearInterval(this.timer);
     const endKind = winner === null ? 'draw'
       : this.cfg.mode === 'bot' ? (winner === this.humanColor ? 'win' : 'lose') : 'win';
@@ -508,8 +541,8 @@ export class Game {
     // If the opponent can't possibly checkmate, a flag is only a draw.
     const opp = other(loser);
     const mine = [];
-    for (const row of this.chess.board()) for (const p of row) if (p && p.color === opp && p.type !== 'k') mine.push(p.type);
-    const cannotMate = mine.length === 0 || (mine.length === 1 && (mine[0] === 'n' || mine[0] === 'b'));
+    for (const row of this.chess.board()) for (const p of row) if (p && p.color === opp && !this.geo.isRoyal(p.type)) mine.push(p.type);
+    const cannotMate = mine.length === 0 || (!this.custom && mine.length === 1 && (mine[0] === 'n' || mine[0] === 'b'));
     if (cannotMate) this.finish(null, 'on time, but the other side can’t checkmate');
     else this.finish(opp, 'on time');
   }
@@ -563,32 +596,33 @@ export class Game {
     if (elo < 1800) movetime = Math.min(movetime, 400 + elo / 3);
     if (elo < 1320) movetime = 0;   // low-Elo search is depth-limited and instant
 
-    let uci;
-    try {
-      uci = await getEngine().bestMove(this.chess.fen(), { elo, movetime, legalCount: this.chess.moves().length });
-    } catch (err) {
-      if (!this.usingFallback) {
-        this.usingFallback = true;
-        this.toast('Stockfish couldn’t start here, so the bot is using a simpler brain. Open the site over http(s) to use Stockfish.');
+    let uci, mv = null;
+    if (this.custom) {
+      const st = { elo, timeMs: Math.min(2200, Math.max(400, this.base ? remaining / 35 + this.inc * 600 : 1200)) };
+      try { mv = await runCustomBot(this.chess.serialize(), st); } catch { mv = null; }
+      if (!mv) { const all = this.chess.moves({ verbose: true }); const r = all[Math.floor(Math.random() * all.length)]; mv = r && { from: r.from, to: r.to, promotion: r.promotion }; }
+    } else {
+      try {
+        uci = await getEngine().bestMove(this.chess.fen(), { elo, movetime, legalCount: this.chess.moves().length });
+      } catch (err) {
+        if (!this.usingFallback) {
+          this.usingFallback = true;
+          this.toast('Stockfish couldn’t start here, so the bot is using a simpler brain. Open the site over http(s) to use Stockfish.');
+        }
+        uci = fallbackMove(this.chess);
       }
-      uci = fallbackMove(this.chess);
+      if (uci && uci !== '(none)') mv = { from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] };
     }
     // Small pause so the bot never feels instant.
     const wait = 450 - (performance.now() - t0);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     if (token !== this.token || this.over) return;
     this.botThinking = false;
-    if (!uci || uci === '(none)') { this.renderStatus(); return; }
-    this.play({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }, true);
+    if (!mv) { this.renderStatus(); return; }
+    this.play(mv, true);
   }
 
-  toast(msg) {
-    const t = document.createElement('div');
-    t.className = 'toast';
-    t.textContent = msg;
-    document.body.append(t);
-    setTimeout(() => t.remove(), 7000);
-  }
+  toast(msg) { toast(msg, 7000); }
 
   destroy() {
     clearInterval(this.timer);

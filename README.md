@@ -1,4 +1,4 @@
-# Boardly  (v1.1)
+# Boardly  (v2.0)
 
 Chess in your browser: play a friend on one screen, or play a Stockfish bot. Pure static site, no build step.
 
@@ -19,6 +19,9 @@ then open http://localhost:8000.
 - `js/main.js`: pages (Home, Play, Settings), settings storage.
 - `js/game.js`: board, moves, clocks, move list, result handling.
 - `js/engine.js`: talks to Stockfish; difficulty to Elo mapping and the human-like weak bot.
+- `js/create.js`, `js/pieceeditor.js`, `js/boardeditor.js`, `js/pixel.js`: the Create tab (lists, piece editor with drawing and movement patterns, board editor, import/export dialogs).
+- `js/library.js`: custom pieces and boards (saved in `localStorage`), checks for imported files, export/import.
+- `js/rules.js`: rules engine for custom boards and pieces. `js/custombot.js` + `js/botworker.js`: the bot for custom games (runs in a Web Worker).
 - `js/themes.js`: site themes and board themes (add a line to add a theme).
 - `js/time.js`: time control helpers. `js/sound.js`: synthesized sounds.
 - `pieces/`: your piece SVGs (`wK.svg`, `bP.svg`, ...).
@@ -31,7 +34,18 @@ then open http://localhost:8000.
 - Stockfish is GPLv3, so keep the repository public (or publish the source) when you host this.
 - Settings, last-used game setup and your name are saved in the browser (`localStorage`).
 
+## Custom boards, pieces and export files
+- **Create → Export** saves one `.txt` named after the date and time (e.g. `2026-11-02_19-59-33.txt`). It is plain JSON containing every custom piece (name, letter, strength, royal/en passant/promotion options, both pictures, every move mark) and every custom board (size, shape, every placement).
+- **Create → Import** accepts that file (drag it in or choose it). Items already in the library are skipped; if an id clashes with a different item, the import is added as a copy.
+- Pieces are drawn on a 64×64 canvas, so files stay small. Uploaded images are shrunk to fit.
+- Custom games have no castling. The bot in custom games is not Stockfish (it only knows normal chess); it uses its own search with the same Elo-style mistakes.
+
 ## Changelog
+### v2.0
+- Create tab: custom pieces (draw or upload, movement patterns, royal, promotion, en passant) and custom boards (any shape up to 16×16, several piece placements each).
+- Import / Export of all custom pieces and boards as one .txt file.
+- Play: Gamemode "Custom" lets you pick a board and a placement, with friend or bot.
+
 ### v1.1
 - 8 site themes (replace the purple) and 12 board themes.
 - New synthesized sounds (wood-like piece clicks, bells) plus a volume slider.

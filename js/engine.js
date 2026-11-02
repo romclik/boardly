@@ -134,10 +134,18 @@ export function lowEloSearch(elo, legalCount) {
  */
 export function pickHumanMove(cands, elo, rand = Math.random) {
   if (cands.length === 1) return cands[0].move;
-  const t = clamp((elo - 100) / (1320 - 100), 0, 1);
-  const temp = 700 * Math.pow(45 / 700, t);        // 700cp at 100 Elo -> 45cp at 1320
-  const budget = lerp(900, 100, Math.sqrt(t));      // biggest "normal" mistake in centipawns
-  const blunderChance = lerp(0.28, 0.03, t);        // chance of a real blunder moment
+  let temp, budget, blunderChance;
+  if (elo <= SF_MIN) {
+    const t = clamp((elo - 100) / (SF_MIN - 100), 0, 1);
+    temp = 700 * Math.pow(45 / 700, t);             // 700cp at 100 Elo -> 45cp at 1320
+    budget = lerp(900, 100, Math.sqrt(t));           // biggest "normal" mistake in centipawns
+    blunderChance = lerp(0.28, 0.03, t);             // chance of a real blunder moment
+  } else {                                           // stronger than 1320 (used by the custom-board bot)
+    const u = clamp((elo - SF_MIN) / (ELO_MAX - SF_MIN), 0, 1);
+    temp = lerp(45, 3, u);
+    budget = lerp(100, 8, u);
+    blunderChance = lerp(0.03, 0, u);
+  }
   const best = cands[0].score;
   const loss = (c) => clamp(best - c.score, 0, 2000);
 
@@ -149,7 +157,7 @@ export function pickHumanMove(cands, elo, rand = Math.random) {
     pool = cands.filter((c) => loss(c) <= budget);
   }
   // A forced mate for us is spotted most of the time even by weak players (simple mate-in-1/2).
-  if (best > 2900 && rand() < lerp(0.5, 0.95, t)) return cands[0].move;
+  if (best > 2900 && rand() < lerp(0.5, 0.95, clamp((elo - 100) / 2000, 0, 1))) return cands[0].move;
 
   const w = pool.map((c) => Math.exp(-loss(c) / T));
   const sum = w.reduce((a, b) => a + b, 0);

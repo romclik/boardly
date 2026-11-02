@@ -3,6 +3,10 @@ import { ELO_MIN, ELO_MAX } from './engine.js';
 import { SITE_THEMES, BOARD_THEMES, applyThemes } from './themes.js';
 import { MINUTES, INCS, PRESETS, timeLabel, category, nearestIndex, minLabel } from './time.js';
 import * as sfx from './sound.js';
+import { createPage } from './create.js';
+import { allBoards, boardById, pieceById, resolveVariant } from './library.js';
+import { thumbBoard } from './boardview.js';
+import { toast } from './ui.js';
 
 // ---------- settings ----------
 const DEFAULTS = {
@@ -29,7 +33,7 @@ const saveSettings = () => store.set('settings', settings);
 applyThemes(settings);
 
 // ---------- play setup state ----------
-const setup = { mode: 'bot', gamemode: 'Classic', time: '15+10', elo: 1800, color: 'w', ...store.get('setup', {}) };
+const setup = { mode: 'bot', gamemode: 'Classic', time: '15+10', elo: 1800, color: 'w', boardId: 'classic', setupId: 'standard', ...store.get('setup', {}) };
 const saveSetup = () => store.set('setup', setup);
 
 let game = null;
@@ -38,8 +42,10 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 
 // ---------- router ----------
 function route() {
-  const name = (location.hash.replace('#/', '') || 'home').split('?')[0];
-  const page = { home, play, settings: settingsPage }[name] ? name : 'home';
+  const parts = (location.hash.replace('#/', '') || 'home').split('?')[0].split('/');
+  const name = parts[0];
+  const pages = { home, play, settings: settingsPage, create: () => createPage(view, parts.slice(1)) };
+  const page = pages[name] ? name : 'home';
   document.querySelectorAll('.sidebar a[data-route]').forEach((a) => {
     const on = a.dataset.route === page;
     a.classList.toggle('active', on);
@@ -48,7 +54,7 @@ function route() {
   game?.root.remove();
   view.textContent = '';
   view.className = 'view page-' + page;
-  ({ home, play, settings: settingsPage })[page]();
+  pages[page]();
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
@@ -82,6 +88,11 @@ function home() {
 function play() {
   if (game) { view.append(game.root); return; }
   const isBot = setup.mode === 'bot';
+  const custom = setup.gamemode === 'Custom';
+  const boards = allBoards();
+  const board = boardById(setup.boardId) || boards[0];
+  const curSetup = board.setups.find((s) => s.id === setup.setupId) || board.setups[0];
+  if (custom) { setup.boardId = board.id; setup.setupId = curSetup.id; }
   const opt = (list, cur) => list.map((t) => `<option${t === cur ? ' selected' : ''}>${t}</option>`).join('');
   view.innerHTML = `
     <div class="setup">
@@ -97,12 +108,21 @@ function play() {
         <h2 id="sp-title">${isBot ? 'Play with bot' : 'Play with friend'}</h2>
         <div class="fields">
           <label class="field"><span>Gamemode</span>
-            <span class="select"><select id="f-mode">${opt(['Classic'], setup.gamemode)}</select></span>
+            <span class="select"><select id="f-mode">${opt(['Classic', 'Custom'], setup.gamemode)}</select></span>
           </label>
           <div class="field right"><span id="lbl-time">Time</span>
             <span class="select"><button type="button" class="selbtn" id="f-time" aria-labelledby="lbl-time f-time" aria-haspopup="dialog">${timeLabel(setup.time)}</button></span>
           </div>
         </div>
+        ${custom ? `
+        <div class="custom-pick">
+          <div class="fields">
+            <label class="field"><span>Board</span><span class="select"><select id="f-board">${boards.map((b) => `<option value="${esc(b.id)}"${b.id === board.id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select></span></label>
+            <label class="field right"><span>Placement</span><span class="select"><select id="f-setup">${board.setups.map((s) => `<option value="${esc(s.id)}"${s.id === curSetup.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></span></label>
+          </div>
+          <div class="cp-preview" id="cp-preview"></div>
+          <p class="hint2">Custom games have no castling.${isBot ? ' The bot uses its own engine here (Stockfish only knows normal chess).' : ''} <a href="#/create">Make your own boards and pieces</a>.</p>
+        </div>` : ''}
         ${isBot ? `
         <div class="diff">
           <label for="f-elo">Difficulty</label>
@@ -122,7 +142,12 @@ function play() {
     </div>`;
 
   view.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => { setup.mode = b.dataset.mode; saveSetup(); play(); }));
-  view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); });
+  view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); play(); });
+  if (custom) {
+    view.querySelector('#cp-preview').append(thumbBoard(board, curSetup, pieceById, 190));
+    view.querySelector('#f-board').addEventListener('change', (e) => { setup.boardId = e.target.value; setup.setupId = ''; saveSetup(); play(); });
+    view.querySelector('#f-setup').addEventListener('change', (e) => { setup.setupId = e.target.value; saveSetup(); play(); });
+  }
   view.querySelector('#f-time').addEventListener('click', () => timePopup((t) => {
     setup.time = t; saveSetup();
     view.querySelector('#f-time').textContent = timeLabel(t);
@@ -155,9 +180,18 @@ function modeBtn(mode, label) {
 
 function startGame() {
   const color = setup.color === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : setup.color;
+  let variant = null;
+  if (setup.gamemode === 'Custom') {
+    variant = resolveVariant(setup.boardId, setup.setupId);
+    if (!variant) { toast('That board no longer exists. Pick another one.'); return; }
+    if (!variant.setup.some((e) => e[3] === 'w') || !variant.setup.some((e) => e[3] === 'b')) {
+      toast('This placement needs pieces for both White and Black. Edit the board in Create.');
+      return;
+    }
+  }
   game?.destroy();
   game = new Game(
-    { mode: setup.mode, time: setup.time, elo: setup.elo, color },
+    { mode: setup.mode, time: setup.time, elo: setup.elo, color, variant },
     settings,
     {
       onChange: updateLive,
@@ -280,7 +314,7 @@ function settingsPage() {
         <label class="srow"><span><span class="s-title">${t}</span><span class="s-desc">${d}</span></span>
           <input class="switch" type="checkbox" role="switch" data-k="${k}"${settings[k] ? ' checked' : ''}></label>`).join('')}
 
-      <p class="foot">Boardly 2026. Made by Claude. v1.1</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.0</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });
