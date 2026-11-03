@@ -90,6 +90,8 @@ export class Game {
     this.render();
     this.timer = setInterval(() => this.tick(), 100);
     sfx.play('start', this.settings);
+    if (this.custom) this.checkEnd();            // an edited position may already be over
+    if (this.over) return;
     if (cfg.mode === 'bot' && !this.custom) {
       getEngine().newGame();
       getEngine().load().catch(() => {});   // start loading right away
@@ -485,7 +487,7 @@ export class Game {
 
   checkEnd() {
     const c = this.chess;
-    if (c.isCheckmate()) this.finish(other(c.turn()), this.custom && c.annihilated() ? 'by capturing every piece' : 'by checkmate');
+    if (c.isCheckmate()) this.finish(other(c.turn()), !this.custom ? 'by checkmate' : c.royalLost() ? 'by capturing the king' : c.annihilated() ? 'by capturing every piece' : 'by checkmate');
     else if (c.isStalemate()) this.finish(null, 'by stalemate');
     else if (c.isInsufficientMaterial()) this.finish(null, 'by insufficient material');
     else if (c.isThreefoldRepetition()) this.finish(null, 'by threefold repetition');

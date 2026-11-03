@@ -24,6 +24,11 @@ function overview(view) {
         <button type="button" class="btn ghost" id="exp">Export</button>
       </div>
     </div>
+    <ol class="how">
+      <li><b>1.</b> Make a <b>piece</b>: name it, draw it, say how it moves, test it.</li>
+      <li><b>2.</b> Make a <b>board</b>: pick any shape and place the pieces.</li>
+      <li><b>3.</b> Go to <b>Play</b>, choose the <b>Custom</b> gamemode and play.</li>
+    </ol>
     <div class="sectors">
       <section class="sector" aria-labelledby="h-pieces">
         <header><h2 id="h-pieces">Pieces <span class="count">${pieces.length}</span></h2><a class="btn primary sm" href="#/create/piece/new">+ New piece</a></header>

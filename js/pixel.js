@@ -16,10 +16,9 @@ export class PixelEditor {
     this.el.innerHTML = `
       <div class="px-stage"><canvas width="${PX}" height="${PX}" class="px-canvas" aria-label="Drawing area"></canvas></div>
       <div class="px-tools" role="radiogroup" aria-label="Tool">
-        <button type="button" class="tool on" data-tool="pen" role="radio" aria-checked="true">Pen</button>
+        <button type="button" class="tool on" data-tool="pen" role="radio" aria-checked="true">✏️ Pen</button>
         <button type="button" class="tool" data-tool="eraser" role="radio" aria-checked="false">Eraser</button>
         <button type="button" class="tool" data-tool="fill" role="radio" aria-checked="false">Fill</button>
-        <button type="button" class="tool" data-tool="pick" role="radio" aria-checked="false">Pick color</button>
       </div>
       <label class="px-row"><span>Brush size</span><input type="range" min="1" max="12" value="${this.size}" class="px-size"><output>${this.size}</output></label>
       <div class="px-colors">
@@ -27,13 +26,19 @@ export class PixelEditor {
         ${PALETTE.map((c) => `<button type="button" class="sw-c" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')}
       </div>
       <div class="px-actions">
-        <button type="button" class="btn ghost sm" data-a="undo">Undo</button>
-        <button type="button" class="btn ghost sm" data-a="redo">Redo</button>
-        <button type="button" class="btn ghost sm" data-a="flip">Flip ↔</button>
+        <button type="button" class="btn ghost sm" data-a="undo">↶ Undo</button>
         <button type="button" class="btn ghost sm" data-a="clear">Clear</button>
-        <button type="button" class="btn ghost sm" data-a="bg">Remove background</button>
-        <label class="btn ghost sm upload">Upload image<input type="file" accept="image/*" hidden></label>
-      </div>`;
+        <label class="btn primary sm upload">⬆ Upload an image<input type="file" accept="image/*" hidden></label>
+      </div>
+      <details class="px-more"><summary>More tools</summary>
+        <div class="px-tools">
+          <button type="button" class="tool" data-tool="pick" role="radio" aria-checked="false">Pick color</button>
+          <button type="button" class="btn ghost sm" data-a="redo">Redo ↷</button>
+          <button type="button" class="btn ghost sm" data-a="flip">Flip ↔</button>
+          <button type="button" class="btn ghost sm" data-a="bg">Remove background</button>
+        </div>
+      </details>
+    `;
     this.canvas = this.el.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
     this.bind();

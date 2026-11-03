@@ -36,9 +36,11 @@ export class CustomChess {
     this.hm = 0;
     this.hist = [];
     this.keys = [];
+    this.hadRoyal = { w: false, b: false };
     this._legal = null;
     if (!skipSetup) {
       for (const [x, y, id, c] of variant.setup) if (this.defs[id]) this.b[y * this.w + x] = { t: id, c, m: false };
+      this.hadRoyal = { w: this.royals('w').length > 0, b: this.royals('b').length > 0 };
       this.keys.push(this.key());
     }
   }
@@ -247,10 +249,12 @@ export class CustomChess {
   annihilated() {
     return !this.b.some((p) => p && p.c === this.turn_);
   }
+  // A side that started with a royal piece and no longer has one has lost (possible in edited, "illegal" positions).
+  royalLost() { return this.hadRoyal[this.turn_] && this.royals(this.turn_).length === 0; }
   isCheckmate() {
-    return this.annihilated() || (this.inCheck() && this.legalInternal().length === 0);
+    return this.annihilated() || this.royalLost() || (this.inCheck() && this.legalInternal().length === 0);
   }
-  isStalemate() { return !this.annihilated() && !this.inCheck() && this.legalInternal().length === 0; }
+  isStalemate() { return !this.annihilated() && !this.royalLost() && !this.inCheck() && this.legalInternal().length === 0; }
   isInsufficientMaterial() {
     return !this.b.some((p) => p && !this.defs[p.t].royal);
   }
@@ -279,7 +283,7 @@ export class CustomChess {
     this._legal = null;
     this.keys.push(this.key());
     let suffix = '';
-    if (this.isCheckmate() && !this.annihilated()) suffix = '#';
+    if (this.isCheckmate() && (!this.annihilated() || this.royalLost())) suffix = '#';
     else if (this.inCheck()) suffix = '+';
     const v = this.verbose(mv, san + suffix);
     this.hist.push({ rec, v });
@@ -314,14 +318,23 @@ export class CustomChess {
     this.b.forEach((p, i) => { if (p) pieces.push([i, p.t, p.c, p.m ? 1 : 0]); });
     return {
       w: this.w, h: this.h, cells: this.cellRows, defs: this.defsRaw,
-      pieces, turn: this.turn_, ep: this.ep, hm: this.hm,
+      pieces, turn: this.turn_, ep: this.ep, hm: this.hm, hadRoyal: this.hadRoyal,
     };
   }
   static restore(s) {
     const g = new CustomChess({ w: s.w, h: s.h, cells: s.cells, setup: [], pieces: s.defs }, true);
     s.pieces.forEach(([i, t, c, m]) => { g.b[i] = { t, c, m: !!m }; });
-    g.turn_ = s.turn; g.ep = s.ep; g.hm = s.hm;
+    g.turn_ = s.turn; g.ep = s.ep; g.hm = s.hm; g.hadRoyal = s.hadRoyal || { w: false, b: false };
     return g;
+  }
+
+  // Raw pseudo-legal moves of the piece on (x, y); lets the piece editor's test board really play them.
+  rawMovesFrom(x, y) {
+    const i = y * this.w + x;
+    const p = this.b[i];
+    const out = [];
+    if (p) this.genFrom(i, p, out);
+    return out;
   }
 
   // Used by the piece editor preview: pseudo-legal moves of the piece standing on (x, y).

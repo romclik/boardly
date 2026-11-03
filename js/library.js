@@ -8,7 +8,7 @@
 // BOARD  { id, name, w, h, cells:[rowString...] (top row first, '1' = square exists),
 //          setups:[{ id, name, pieces:[[x, y, pieceId, 'w'|'b'], ...] }] }
 
-export const APP_VERSION = '2.0';
+export const APP_VERSION = '2.1';
 export const MAX_SIZE = 16;
 const IMG_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 const MAX_IMG = 160000;
@@ -234,10 +234,11 @@ export function sanitizeBoard(raw, knownPieceIds) {
 }
 
 // ---------- variant for the rules engine ----------
-export function resolveVariant(boardId, setupId) {
+export function resolveVariant(boardId, setupId, pieceList = null) {
   const board = boardById(boardId);
   if (!board) return null;
   const setup = board.setups.find((s) => s.id === setupId) || board.setups[0];
+  const list = pieceList || setup.pieces;
   const pieces = {};
   const add = (id) => {
     if (pieces[id]) return;
@@ -246,8 +247,8 @@ export function resolveVariant(boardId, setupId) {
     pieces[id] = p;
     p.promo.forEach(add);
   };
-  setup.pieces.forEach((e) => add(e[2]));
-  return { boardId: board.id, name: board.name, w: board.w, h: board.h, cells: board.cells, setup: setup.pieces, pieces };
+  list.forEach((e) => add(e[2]));
+  return { boardId: board.id, name: board.name, w: board.w, h: board.h, cells: board.cells, setup: list.filter((e) => pieces[e[2]]), pieces };
 }
 
 // ---------- export / import ----------

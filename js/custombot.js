@@ -83,7 +83,8 @@ export function chooseMove(state, { elo, timeMs }) {
       let score;
       g._legal = null;
       const replies = g.legalInternal();
-      if (!replies.length) score = g.hasCheck(g.turn_) ? MATE : 0;
+      if (g.isCheckmate()) score = MATE;              // mate, a captured king, or nothing left to move
+      else if (!replies.length) score = 0;
       else score = -negamax(d - 1, -INF, -(bestSoFar - window), 1);
       g.unmake(rec);
       g._legal = null;

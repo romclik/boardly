@@ -1,4 +1,4 @@
-# Boardly  (v2.0)
+# Boardly  (v2.1)
 
 Chess in your browser: play a friend on one screen, or play a Stockfish bot. Pure static site, no build step.
 
@@ -41,6 +41,12 @@ then open http://localhost:8000.
 - Custom games have no castling. The bot in custom games is not Stockfish (it only knows normal chess); it uses its own search with the same Elo-style mistakes.
 
 ## Changelog
+### v2.1
+- Pieces are created in 4 steps (details, picture, movement with a live check, a test board with only that piece); boards in 3 steps (name and size, shape, pieces).
+- Simpler wording and controls; advanced options are tucked into "More options".
+- Custom gamemode opens as a popup where you pick the board and layout and can edit the position for that game, including positions that could never happen in a real game.
+- Games can start already finished (for example a position that is checkmate); capturing a king ends the game.
+
 ### v2.0
 - Create tab: custom pieces (draw or upload, movement patterns, royal, promotion, en passant) and custom boards (any shape up to 16×16, several piece placements each).
 - Import / Export of all custom pieces and boards as one .txt file.

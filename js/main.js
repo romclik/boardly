@@ -6,6 +6,7 @@ import * as sfx from './sound.js';
 import { createPage } from './create.js';
 import { allBoards, boardById, pieceById, resolveVariant } from './library.js';
 import { thumbBoard } from './boardview.js';
+import { openCustomSetup } from './customsetup.js';
 import { toast } from './ui.js';
 
 // ---------- settings ----------
@@ -37,6 +38,7 @@ const setup = { mode: 'bot', gamemode: 'Classic', time: '15+10', elo: 1800, colo
 const saveSetup = () => store.set('setup', setup);
 
 let game = null;
+let customEdit = null;      // an edited position for the next Custom game: { boardId, setupId, pieces }
 const view = document.getElementById('view');
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -93,6 +95,7 @@ function play() {
   const board = boardById(setup.boardId) || boards[0];
   const curSetup = board.setups.find((s) => s.id === setup.setupId) || board.setups[0];
   if (custom) { setup.boardId = board.id; setup.setupId = curSetup.id; }
+  const edited = custom && customEdit && customEdit.boardId === board.id && customEdit.setupId === curSetup.id;
   const opt = (list, cur) => list.map((t) => `<option${t === cur ? ' selected' : ''}>${t}</option>`).join('');
   view.innerHTML = `
     <div class="setup">
@@ -115,14 +118,12 @@ function play() {
           </div>
         </div>
         ${custom ? `
-        <div class="custom-pick">
-          <div class="fields">
-            <label class="field"><span>Board</span><span class="select"><select id="f-board">${boards.map((b) => `<option value="${esc(b.id)}"${b.id === board.id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select></span></label>
-            <label class="field right"><span>Placement</span><span class="select"><select id="f-setup">${board.setups.map((s) => `<option value="${esc(s.id)}"${s.id === curSetup.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></span></label>
-          </div>
-          <div class="cp-preview" id="cp-preview"></div>
-          <p class="hint2">Custom games have no castling.${isBot ? ' The bot uses its own engine here (Stockfish only knows normal chess).' : ''} <a href="#/create">Make your own boards and pieces</a>.</p>
-        </div>` : ''}
+        <div class="custom-card">
+          <div class="cc-thumb" id="cc-thumb"></div>
+          <div class="cc-body"><b>${esc(board.name)}</b><small>${esc(curSetup.name)}${edited ? ' · edited position' : ''}</small></div>
+          <button type="button" class="btn primary sm" id="cc-open">Change setup…</button>
+        </div>
+        <p class="hint2">Pick a board and a starting layout, and move any pieces around for this game. Custom games have no castling.${isBot ? ' The bot uses its own engine here (Stockfish only knows normal chess).' : ''}</p>` : ''}
         ${isBot ? `
         <div class="diff">
           <label for="f-elo">Difficulty</label>
@@ -142,16 +143,11 @@ function play() {
     </div>`;
 
   view.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => { setup.mode = b.dataset.mode; saveSetup(); play(); }));
-  view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); play(); });
+  view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); play(); if (setup.gamemode === 'Custom') openCustomDialog(); });
   if (custom) {
-    view.querySelector('#cp-preview').append(thumbBoard(board, curSetup, pieceById, 190));
-    view.querySelector('#f-board').addEventListener('change', (e) => { setup.boardId = e.target.value; setup.setupId = ''; saveSetup(); play(); });
-    view.querySelector('#f-setup').addEventListener('change', (e) => { setup.setupId = e.target.value; saveSetup(); play(); });
+    view.querySelector('#cc-thumb').append(thumbBoard(board, { pieces: edited ? customEdit.pieces : curSetup.pieces }, pieceById, 130));
+    view.querySelector('#cc-open').addEventListener('click', openCustomDialog);
   }
-  view.querySelector('#f-time').addEventListener('click', () => timePopup((t) => {
-    setup.time = t; saveSetup();
-    view.querySelector('#f-time').textContent = timeLabel(t);
-  }));
   const elo = view.querySelector('#f-elo');
   if (elo) {
     elo.addEventListener('input', () => {
@@ -168,6 +164,16 @@ function play() {
   view.querySelector('#start').addEventListener('click', startGame);
 }
 
+function openCustomDialog() {
+  const match = customEdit && customEdit.boardId === setup.boardId && customEdit.setupId === setup.setupId;
+  openCustomSetup({ boardId: setup.boardId, setupId: setup.setupId, pieces: match ? customEdit.pieces : null }, (res) => {
+    setup.boardId = res.boardId; setup.setupId = res.setupId;
+    customEdit = res.edited ? { boardId: res.boardId, setupId: res.setupId, pieces: res.pieces } : null;
+    saveSetup();
+    play();
+  });
+}
+
 const pct = (v) => (v - ELO_MIN) / (ELO_MAX - ELO_MIN);
 
 function modeBtn(mode, label) {
@@ -182,7 +188,8 @@ function startGame() {
   const color = setup.color === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : setup.color;
   let variant = null;
   if (setup.gamemode === 'Custom') {
-    variant = resolveVariant(setup.boardId, setup.setupId);
+    const useEdit = customEdit && customEdit.boardId === setup.boardId && customEdit.setupId === setup.setupId;
+    variant = resolveVariant(setup.boardId, setup.setupId, useEdit ? customEdit.pieces : null);
     if (!variant) { toast('That board no longer exists. Pick another one.'); return; }
     if (!variant.setup.some((e) => e[3] === 'w') || !variant.setup.some((e) => e[3] === 'b')) {
       toast('This placement needs pieces for both White and Black. Edit the board in Create.');
@@ -314,7 +321,7 @@ function settingsPage() {
         <label class="srow"><span><span class="s-title">${t}</span><span class="s-desc">${d}</span></span>
           <input class="switch" type="checkbox" role="switch" data-k="${k}"${settings[k] ? ' checked' : ''}></label>`).join('')}
 
-      <p class="foot">Boardly 2026. Made by Claude. v2.0</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.1</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });
