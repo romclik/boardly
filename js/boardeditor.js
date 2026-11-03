@@ -110,7 +110,7 @@ export function boardEditor(view, id) {
       body.innerHTML = `
         <div class="two">
           <div>
-            <label class="fld big"><span>What is your board called?</span><input class="text lg" id="be-name" maxlength="40" placeholder="e.g. Crossroads" autocomplete="off"></label>
+            <label class="fld big"><span>What is your board called?</span><input class="text xl" id="be-name" maxlength="40" placeholder="e.g. Crossroads" autocomplete="off"></label>
             <div class="fld"><span>Width <output id="o-w">${w}</output> squares</span><div class="range plain"><input id="r-w" type="range" min="1" max="${MAX_SIZE}" value="${w}" aria-label="Width"></div></div>
             <div class="fld"><span>Height <output id="o-h">${h}</output> squares</span><div class="range plain"><input id="r-h" type="range" min="1" max="${MAX_SIZE}" value="${h}" aria-label="Height"></div></div>
           </div>

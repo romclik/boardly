@@ -237,8 +237,8 @@ export class Game {
       el.classList.toggle('sel', this.selected === name);
       el.classList.toggle('check', checkSet.has(name));
       const t = this.targets.get(name);
-      el.classList.toggle('hint', !!(s.hints && t && !t.cap));
-      el.classList.toggle('hint-cap', !!(s.hints && t && t.cap));
+      el.classList.toggle('dest', !!(s.hints && t && !t.cap));
+      el.classList.toggle('dest-cap', !!(s.hints && t && t.cap));
       el.querySelector('img.pc')?.remove();
       const p = at[name];
       if (p) {
@@ -299,7 +299,7 @@ export class Game {
         <div class="pbar side-${side} ${state}">
           <span class="pname">${info.name}${info.elo ? ` <span class="elo">(${info.elo})</span>` : ''}</span>
           <span class="took">${icons}${adv > 0 ? `<em>+${adv}</em>` : ''}</span>
-          ${moving ? '<span class="dot" title="To move"></span>' : ''}
+          ${moving ? '<span class="turn-dot" title="To move"></span>' : ''}
         </div>
         <div class="clock side-${side} ${moving ? 'running' : ''}" data-side="${side}">--:--</div>`;
     });

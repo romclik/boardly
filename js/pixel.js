@@ -1,5 +1,6 @@
 // A tiny pixel/paint editor. The canvas is only 64×64 so saved pieces stay small.
 export const PX = 64;
+const SHAPES = ['line', 'rect', 'ellipse'];
 const PALETTE = ['#000000', '#ffffff', '#6b6b73', '#c9c9d1', '#e03131', '#f76707', '#fab005', '#40c057', '#12b886', '#228be6', '#5c14ee', '#be4bdb', '#f06595', '#8b5a2b', '#ffd8a8', '#3b2f2f'];
 
 export class PixelEditor {
@@ -7,6 +8,8 @@ export class PixelEditor {
     this.onChange = onChange || (() => {});
     this.tool = 'pen';
     this.size = 4;
+    this.fillShapes = false;
+    this.mirror = false;
     this.color = '#5c14ee';
     this.undoStack = [];
     this.redoStack = [];
@@ -16,28 +19,32 @@ export class PixelEditor {
     this.el.innerHTML = `
       <div class="px-stage"><canvas width="${PX}" height="${PX}" class="px-canvas" aria-label="Drawing area"></canvas></div>
       <div class="px-tools" role="radiogroup" aria-label="Tool">
-        <button type="button" class="tool on" data-tool="pen" role="radio" aria-checked="true">✏️ Pen</button>
-        <button type="button" class="tool" data-tool="eraser" role="radio" aria-checked="false">Eraser</button>
+        <button type="button" class="tool on" data-tool="pen" role="radio" aria-checked="true">Pen</button>
+        <button type="button" class="tool" data-tool="line" role="radio" aria-checked="false">Line</button>
+        <button type="button" class="tool" data-tool="rect" role="radio" aria-checked="false">Rectangle</button>
+        <button type="button" class="tool" data-tool="ellipse" role="radio" aria-checked="false">Circle</button>
         <button type="button" class="tool" data-tool="fill" role="radio" aria-checked="false">Fill</button>
+        <button type="button" class="tool" data-tool="eraser" role="radio" aria-checked="false">Eraser</button>
+        <button type="button" class="tool" data-tool="pick" role="radio" aria-checked="false">Pick color</button>
       </div>
-      <label class="px-row"><span>Brush size</span><input type="range" min="1" max="12" value="${this.size}" class="px-size"><output>${this.size}</output></label>
+      <label class="px-row"><span>Brush size</span><input type="range" min="1" max="16" value="${this.size}" class="px-size"><output>${this.size}</output></label>
+      <div class="px-opts">
+        <label class="chk"><input type="checkbox" class="px-fill"> Fill shapes</label>
+        <label class="chk"><input type="checkbox" class="px-mirror"> Mirror left ↔ right while drawing</label>
+      </div>
       <div class="px-colors">
         <input type="color" class="px-color" value="${this.color}" aria-label="Color">
         ${PALETTE.map((c) => `<button type="button" class="sw-c" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')}
       </div>
       <div class="px-actions">
         <button type="button" class="btn ghost sm" data-a="undo">↶ Undo</button>
+        <button type="button" class="btn ghost sm" data-a="redo">Redo ↷</button>
+        <button type="button" class="btn ghost sm" data-a="flip">Flip ↔</button>
+        <button type="button" class="btn ghost sm" data-a="flipv">Flip ↕</button>
+        <button type="button" class="btn ghost sm" data-a="bg">Remove background</button>
         <button type="button" class="btn ghost sm" data-a="clear">Clear</button>
         <label class="btn primary sm upload">⬆ Upload an image<input type="file" accept="image/*" hidden></label>
       </div>
-      <details class="px-more"><summary>More tools</summary>
-        <div class="px-tools">
-          <button type="button" class="tool" data-tool="pick" role="radio" aria-checked="false">Pick color</button>
-          <button type="button" class="btn ghost sm" data-a="redo">Redo ↷</button>
-          <button type="button" class="btn ghost sm" data-a="flip">Flip ↔</button>
-          <button type="button" class="btn ghost sm" data-a="bg">Remove background</button>
-        </div>
-      </details>
     `;
     this.canvas = this.el.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
@@ -52,11 +59,14 @@ export class PixelEditor {
     }));
     $('.px-size').addEventListener('input', (e) => { this.size = +e.target.value; $('.px-row output').textContent = this.size; });
     $('.px-color').addEventListener('input', (e) => { this.color = e.target.value; });
+    $('.px-fill').addEventListener('change', (e) => { this.fillShapes = e.target.checked; });
+    $('.px-mirror').addEventListener('change', (e) => { this.mirror = e.target.checked; });
     this.el.querySelectorAll('.sw-c').forEach((b) => b.addEventListener('click', () => { this.setColor(b.dataset.c); }));
     this.el.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => this.action(b.dataset.a)));
     $('input[type=file]').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) this.uploadFile(f); });
 
     let last = null;
+    let shape = null;
     const pos = (e) => {
       const r = this.canvas.getBoundingClientRect();
       return [((e.clientX - r.left) / r.width) * PX, ((e.clientY - r.top) / r.height) * PX];
@@ -68,10 +78,17 @@ export class PixelEditor {
       this.snapshot();
       if (this.tool === 'fill') { this.fill(Math.floor(x), Math.floor(y)); this.changed(); return; }
       this.canvas.setPointerCapture(e.pointerId);
+      if (SHAPES.includes(this.tool)) { shape = { start: [x, y], base: this.ctx.getImageData(0, 0, PX, PX) }; return; }
       last = [x, y];
       this.stamp(x, y);
     });
     this.canvas.addEventListener('pointermove', (e) => {
+      if (shape) {
+        const [sx, sy] = pos(e);
+        this.ctx.putImageData(shape.base, 0, 0);
+        this.drawShape(shape.start, [sx, sy]);
+        return;
+      }
       if (!last) return;
       const [x, y] = pos(e);
       const dist = Math.hypot(x - last[0], y - last[1]);
@@ -79,7 +96,7 @@ export class PixelEditor {
       for (let i = 1; i <= steps; i++) this.stamp(last[0] + ((x - last[0]) * i) / steps, last[1] + ((y - last[1]) * i) / steps);
       last = [x, y];
     });
-    const end = () => { if (last) { last = null; this.changed(); } };
+    const end = () => { if (shape) { shape = null; this.changed(); return; } if (last) { last = null; this.changed(); } };
     this.canvas.addEventListener('pointerup', end);
     this.canvas.addEventListener('pointercancel', end);
   }
@@ -91,9 +108,30 @@ export class PixelEditor {
     ctx.save();
     if (this.tool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
     ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(x, y, this.size / 2, 0, Math.PI * 2);
-    ctx.fill();
+    for (const px of this.mirror ? [x, PX - x] : [x]) {
+      ctx.beginPath();
+      ctx.arc(px, y, this.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  drawShape(a, b) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = this.size;
+    ctx.strokeStyle = ctx.fillStyle = this.color;
+    const one = (p, q) => {
+      ctx.beginPath();
+      if (this.tool === 'line') { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); return; }
+      const x = Math.min(p[0], q[0]), y = Math.min(p[1], q[1]), w = Math.abs(q[0] - p[0]), h = Math.abs(q[1] - p[1]);
+      if (this.tool === 'rect') { ctx.rect(x, y, w, h); }
+      else { ctx.ellipse(x + w / 2, y + h / 2, Math.max(w / 2, 0.5), Math.max(h / 2, 0.5), 0, 0, Math.PI * 2); }
+      if (this.fillShapes) ctx.fill(); else ctx.stroke();
+    };
+    one(a, b);
+    if (this.mirror) one([PX - a[0], a[1]], [PX - b[0], b[1]]);
     ctx.restore();
   }
 
@@ -152,6 +190,14 @@ export class PixelEditor {
       copy.getContext('2d').drawImage(this.canvas, 0, 0);
       this.ctx.clearRect(0, 0, PX, PX);
       this.ctx.save(); this.ctx.translate(PX, 0); this.ctx.scale(-1, 1); this.ctx.drawImage(copy, 0, 0); this.ctx.restore();
+      this.changed();
+    } else if (a === 'flipv') {
+      this.snapshot();
+      const copy = document.createElement('canvas');
+      copy.width = copy.height = PX;
+      copy.getContext('2d').drawImage(this.canvas, 0, 0);
+      this.ctx.clearRect(0, 0, PX, PX);
+      this.ctx.save(); this.ctx.translate(0, PX); this.ctx.scale(1, -1); this.ctx.drawImage(copy, 0, 0); this.ctx.restore();
       this.changed();
     } else if (a === 'bg') {
       this.snapshot(); this.removeBackground(); this.changed();

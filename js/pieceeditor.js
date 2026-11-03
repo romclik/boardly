@@ -70,7 +70,7 @@ export function pieceEditor(view, id) {
     label: 'Details', title: 'Step 1 · Name and strength', hint: 'Start by naming your piece. You can change everything later.',
     mount(body) {
       body.innerHTML = `
-        <label class="fld big"><span>What is your piece called?</span><input class="text lg" id="pe-name" maxlength="30" placeholder="e.g. Dragon, Archer, Wizard" autocomplete="off"></label>
+        <label class="fld big"><span>What is your piece called?</span><input class="text xl" id="pe-name" maxlength="30" placeholder="e.g. Dragon, Archer, Wizard" autocomplete="off"></label>
         <div class="fld"><span>How strong is it? <output id="st-out"></output></span>
           <div class="range plain"><input id="pe-val" type="range" min="1" max="15" step="1" aria-label="Strength"></div>
           <small class="hint2" id="st-desc"></small></div>

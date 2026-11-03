@@ -1,63 +1,45 @@
-# Boardly  (v2.1)
+# Boardly
 
-Chess in your browser: play a friend on one screen, or play a Stockfish bot. Pure static site, no build step.
+Chess in your browser. Play a friend on one screen, or play a bot, on the classic board or on boards and pieces you design yourself.
 
-## Put it on GitHub Pages
-1. Create a new repository and upload **everything in this folder** (keep the folder structure; include the hidden `.nojekyll` file).
-2. In the repo: **Settings → Pages → Build and deployment → Source: Deploy from a branch**, pick `main` and `/ (root)`.
-3. Wait a minute. Your site is at `https://<your-username>.github.io/<repo-name>/`.
-
-## Try it on your computer
-Browsers block Web Workers on `file://`, so double-clicking `index.html` makes the bot fall back to a very basic brain. Run a tiny local server instead:
-
-    python -m http.server 8000
-
-then open http://localhost:8000.
-
-## Folder map
-- `index.html`, `css/style.css`: layout and look. Colors are CSS variables at the top of `style.css` (`--purple`, `--lt`, `--dk`...).
-- `js/main.js`: pages (Home, Play, Settings), settings storage.
-- `js/game.js`: board, moves, clocks, move list, result handling.
-- `js/engine.js`: talks to Stockfish; difficulty to Elo mapping and the human-like weak bot.
-- `js/create.js`, `js/pieceeditor.js`, `js/boardeditor.js`, `js/pixel.js`: the Create tab (lists, piece editor with drawing and movement patterns, board editor, import/export dialogs).
-- `js/library.js`: custom pieces and boards (saved in `localStorage`), checks for imported files, export/import.
-- `js/rules.js`: rules engine for custom boards and pieces. `js/custombot.js` + `js/botworker.js`: the bot for custom games (runs in a Web Worker).
-- `js/themes.js`: site themes and board themes (add a line to add a theme).
-- `js/time.js`: time control helpers. `js/sound.js`: synthesized sounds.
-- `pieces/`: your piece SVGs (`wK.svg`, `bP.svg`, ...).
-- `engine/`: Stockfish 19 lite (WebAssembly, single-threaded) from the `stockfish` npm package, GPLv3 (see `engine/Copying.txt`).
-- `vendor/chess.js`: chess rules library (BSD-2).
+## What you can do
+- **Play with a friend** on one screen, or **with a bot** from 100 to 3200 Elo.
+- **Classic** or **Custom** gamemode, with a time control you set with total time and increment sliders.
+- **Create** your own pieces (draw or upload a picture, set how they move) and boards (any shape up to 16×16, with piece layouts).
+- **Themes**: 8 site colors and 12 board styles, plus sound effects with a volume slider.
+- **Import / Export** everything you create as one text file.
 
 ## Notes
-- 1320 to 3190 Elo uses Stockfish's built-in limiter; 3200 turns it off.
-- Below 1320 (down to 100) the bot searches shallowly for several candidate moves (MultiPV), then picks one that loses a limited amount of evaluation, with an occasional bigger blunder. Weaker = shallower search, bigger allowed mistakes, more blunders.
-- Stockfish is GPLv3, so keep the repository public (or publish the source) when you host this.
-- Settings, last-used game setup and your name are saved in the browser (`localStorage`).
+- The classic bot is [Stockfish](https://stockfishchess.org/) 19 (lite, WebAssembly). From 1320 to 3190 Elo it uses Stockfish's own strength limiter; 3200 is full strength. Below 1320 it searches shallowly and picks from several candidate moves, with small mistakes and an occasional blunder, so weaker settings play more like a beginner than like a random mover.
+- Custom games use Boardly's own rules engine and bot (Stockfish only knows normal chess). The bot follows the same Elo slider but is weaker than Stockfish at the top end.
+- Custom games have no castling. En passant and promotion work for pieces that have those options turned on.
+- In a Custom game you can edit the starting position for that game, including positions that could never happen in real chess. A side that loses its royal piece loses the game.
+- Settings, your pieces and your boards are stored in your browser. Clearing site data removes them, so use Export for a backup.
+- Third-party code: Stockfish (GPLv3, see `engine/Copying.txt`) and chess.js (BSD-2, see `vendor/chess.js.LICENSE`).
 
 ## Custom boards, pieces and export files
-- **Create → Export** saves one `.txt` named after the date and time (e.g. `2026-11-02_19-59-33.txt`). It is plain JSON containing every custom piece (name, letter, strength, royal/en passant/promotion options, both pictures, every move mark) and every custom board (size, shape, every placement).
-- **Create → Import** accepts that file (drag it in or choose it). Items already in the library are skipped; if an id clashes with a different item, the import is added as a copy.
-- Pieces are drawn on a 64×64 canvas, so files stay small. Uploaded images are shrunk to fit.
-- Custom games have no castling. The bot in custom games is not Stockfish (it only knows normal chess); it uses its own search with the same Elo-style mistakes.
+- **Create → Export** saves one `.txt` named after the date and time (for example `2026-11-02_19-59-33.txt`). It is plain JSON containing every custom piece (name, letter, strength, royal / en passant / promotion options, both pictures and every move mark) and every custom board (size, shape and every layout).
+- **Create → Import** accepts that file, by drag and drop or the file chooser. It shows what it found before adding anything. Items you already have are skipped, and if an id clashes with a different item the import is added as a copy.
+- A piece is made in four steps: details, picture, movement (with a live check) and a test board. A board is made in three: name and size, shape and piece layouts.
+- Pictures are drawn on a 64×64 canvas so files stay small. Uploaded images are shrunk to fit.
+- In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v2.1.1
+- Fixed: the piece name field in the creator was almost invisible, so nothing could be typed in it.
+- Fixed: black bars above the move-hint squares on the board (a style clash gave those squares an extra top margin).
+- Picture step: all drawing tools are now visible, plus new Line, Rectangle, Circle, "Fill shapes", "Mirror while drawing" and Flip ↕.
+
 ### v2.1
-- Pieces are created in 4 steps (details, picture, movement with a live check, a test board with only that piece); boards in 3 steps (name and size, shape, pieces).
-- Simpler wording and controls; advanced options are tucked into "More options".
-- Custom gamemode opens as a popup where you pick the board and layout and can edit the position for that game, including positions that could never happen in a real game.
-- Games can start already finished (for example a position that is checkmate); capturing a king ends the game.
+- Pieces are created in 4 steps and boards in 3, with simpler wording; advanced options live under "More options".
+- Custom gamemode opens as a popup where you pick the board and layout and edit the position for that game, including illegal positions.
+- Games can start already finished; capturing a king ends the game.
 
 ### v2.0
-- Create tab: custom pieces (draw or upload, movement patterns, royal, promotion, en passant) and custom boards (any shape up to 16×16, several piece placements each).
-- Import / Export of all custom pieces and boards as one .txt file.
-- Play: Gamemode "Custom" lets you pick a board and a placement, with friend or bot.
+- Create tab: custom pieces and custom boards, Import / Export, and the Custom gamemode.
 
 ### v1.1
-- 8 site themes (replace the purple) and 12 board themes.
-- New synthesized sounds (wood-like piece clicks, bells) plus a volume slider.
-- Time control popup with total-time and increment sliders, quick picks and a no-clock switch.
-- Human-like low-Elo bot, now down to 100 Elo.
-- Settings footer with version.
+- 8 site themes and 12 board themes, new synthesized sounds with volume, time-control popup with sliders, human-like low-Elo bots (down to 100 Elo).
 
 ### v1.0
-- First release.
+- First release: play with a friend or a Stockfish bot, classic rules.

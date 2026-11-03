@@ -321,7 +321,7 @@ function settingsPage() {
         <label class="srow"><span><span class="s-title">${t}</span><span class="s-desc">${d}</span></span>
           <input class="switch" type="checkbox" role="switch" data-k="${k}"${settings[k] ? ' checked' : ''}></label>`).join('')}
 
-      <p class="foot">Boardly 2026. Made by Claude. v2.1</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.1.1</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });

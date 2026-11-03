@@ -70,7 +70,7 @@ function overview(view) {
 
   const boardCard = (b) => {
     const el = document.createElement('article');
-    el.className = 'item board';
+    el.className = 'item is-board';
     el.innerHTML = `<div class="item-pic"></div>
       <div class="item-body"><strong>${esc(b.name)}</strong><small>${b.w}×${b.h} · ${b.setups.length} placement${b.setups.length === 1 ? '' : 's'}</small></div>
       <div class="item-actions">${b.builtin ? '' : `<a class="link-btn" href="#/create/board/${encodeURIComponent(b.id)}">Edit</a>`}
