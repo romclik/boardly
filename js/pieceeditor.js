@@ -1,5 +1,5 @@
 import { wizard } from './wizard.js';
-import { PixelEditor, darkenDataURL } from './pixel.js';
+import { PixelEditor, invertDataURL } from './pixel.js';
 import { allPieces, pieceById, savePiece, uid, estimateValue, presetMoves, PRESET_NAMES, gcd } from './library.js';
 import { CustomChess } from './rules.js';
 import { createGrid, setPiece } from './boardview.js';
@@ -58,7 +58,7 @@ export function pieceEditor(view, id) {
   async function commitImages() {
     syncCurrent();
     fin.w = imgs.w;
-    fin.b = blackMode === 'auto' || !imgs.b ? (imgs.w ? await darkenDataURL(imgs.w) : null) : imgs.b;
+    fin.b = blackMode === 'auto' || !imgs.b ? (imgs.w ? await invertDataURL(imgs.w) : null) : imgs.b;
   }
   const makeDef = () => ({
     id: 'X', name: p.name || 'Piece', sym: '', royal: false, value: 1, rel: p.rel, ep: p.ep, promo: [],
@@ -130,9 +130,9 @@ export function pieceEditor(view, id) {
           </div>
           <aside class="pic-side">
             <h3>Black piece</h3>
-            <label class="opt"><input type="radio" name="bm" value="auto"><span><b>Make it automatically</b><small>A darker copy of your white piece.</small></span></label>
+            <label class="opt"><input type="radio" name="bm" value="auto"><span><b>Make it automatically</b><small>Your white piece with its colors inverted.</small></span></label>
             <label class="opt"><input type="radio" name="bm" value="draw"><span><b>I’ll draw it myself</b><small>Use the “Black piece” tab on the left.</small></span></label>
-            <button type="button" class="btn ghost sm" id="copy-dark">Start black from the white one</button>
+            <button type="button" class="btn ghost sm" id="copy-dark">Start black from the white one (inverted)</button>
             <h3>How it will look</h3>
             <div class="pic-prev"><div class="pp light"><img id="pp-w" alt=""></div><div class="pp dark"><img id="pp-b" alt=""></div></div>
           </aside>
@@ -149,7 +149,7 @@ export function pieceEditor(view, id) {
         if (!$('#pp-w')) return;
         syncCurrent();
         const w = imgs.w;
-        const b = blackMode === 'auto' ? (w ? await darkenDataURL(w) : null) : (imgs.b || null);
+        const b = blackMode === 'auto' ? (w ? await invertDataURL(w) : null) : (imgs.b || null);
         $('#pp-w')?.setAttribute('src', w || BLOCKER);
         $('#pp-b')?.setAttribute('src', b || BLOCKER);
         $('#pp-w')?.classList.toggle('empty', !w);
@@ -170,7 +170,7 @@ export function pieceEditor(view, id) {
       $('#copy-dark').addEventListener('click', async () => {
         syncCurrent();
         if (!imgs.w) { toast('Draw the white piece first.'); return; }
-        imgs.b = await darkenDataURL(imgs.w);
+        imgs.b = await invertDataURL(imgs.w);
         dirty.b = true;
         await px.load(imgs.b);
         paintTabs(); updatePrev();

@@ -86,7 +86,11 @@ export class Game {
     this.botThinking = false;
     this.token = 0;
     this.usingFallback = false;
+    this.view = null;                // null = live position, otherwise how many plies are shown
+    this.viewChess = null;
     this.build();
+    this.onKey = (e) => this.handleKey(e);
+    document.addEventListener('keydown', this.onKey);
     this.render();
     this.timer = setInterval(() => this.tick(), 100);
     sfx.play('start', this.settings);
@@ -117,6 +121,12 @@ export class Game {
       <aside class="moves-panel">
         <div class="mp-head"><h2>Moves</h2><span class="status" aria-live="polite"></span></div>
         <ol class="moves-list"></ol>
+        <div class="nav-row" role="group" aria-label="Browse moves">
+          <button type="button" data-nav="first" title="Start of the game" aria-label="Start of the game"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 5v14M19 5L9 12l10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+          <button type="button" data-nav="prev" title="Previous move" aria-label="Previous move"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M17 5L7 12l10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+          <button type="button" data-nav="next" title="Next move" aria-label="Next move"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M7 5l10 7-10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+          <button type="button" data-nav="live" title="Current position" aria-label="Current position"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M18 5v14M5 5l10 7-10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+        </div>
         <div class="result" hidden></div>
         <div class="mp-actions"></div>
       </aside>`;
@@ -133,6 +143,14 @@ export class Game {
     this.buildBoard();
     this.buildActions();
     this.boardEl.addEventListener('pointerdown', (e) => this.onDown(e));
+    root.querySelector('.nav-row').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-nav]');
+      if (b) this.navigate(b.dataset.nav);
+    });
+    this.listEl.addEventListener('click', (e) => {
+      const m = e.target.closest('[data-ply]');
+      if (m) this.setView(+m.dataset.ply);
+    });
   }
 
   buildBoard() {
@@ -195,16 +213,55 @@ export class Game {
     return { name: side === 'w' ? 'WHITE' : 'BLACK', elo: null };
   }
 
+  // ---------- browsing earlier moves ----------
+  get plies() { return this.chess.history().length; }
+  get curPly() { return this.view ?? this.plies; }
+  src() { return this.view == null ? this.chess : this.viewChess; }
+
+  setView(n) {
+    const len = this.plies;
+    n = Math.max(0, Math.min(len, n));
+    this.closePromotion?.();
+    this.selected = null;
+    this.targets.clear();
+    if (n >= len) { this.view = null; this.viewChess = null; }
+    else {
+      const hist = this.chess.history({ verbose: true });
+      const c = this.custom ? new CustomChess(this.cfg.variant) : new Chess();
+      for (let i = 0; i < n; i++) c.move({ from: hist[i].from, to: hist[i].to, promotion: hist[i].promotion });
+      this.view = n;
+      this.viewChess = c;
+    }
+    this.render();
+  }
+
+  navigate(what) {
+    const cur = this.curPly;
+    if (what === 'first') this.setView(0);
+    else if (what === 'prev') this.setView(cur - 1);
+    else if (what === 'next') this.setView(cur + 1);
+    else if (what === 'live') this.setView(this.plies);
+  }
+
+  handleKey(e) {
+    if (!this.root.isConnected || document.querySelector('.modal')) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return;
+    const k = { ArrowLeft: 'prev', ArrowRight: 'next', Home: 'first', End: 'live' }[e.key];
+    if (!k) return;
+    e.preventDefault();
+    this.navigate(k);
+  }
+
   canMoveColor(color) {
-    if (this.over || this.promoPending) return false;
+    if (this.over || this.promoPending || this.view != null) return false;
     if (this.cfg.mode === 'bot') return color === this.humanColor && this.chess.turn() === color && !this.botThinking;
     return color === this.chess.turn();
   }
 
-  checkSquares() {
-    if (!this.chess.inCheck()) return [];
-    if (this.custom) return this.chess.checkedSquares();
-    for (const row of this.chess.board()) for (const p of row) if (p && p.type === 'k' && p.color === this.chess.turn()) return [p.square];
+  checkSquares(c = this.chess) {
+    if (!c.inCheck()) return [];
+    if (this.custom) return c.checkedSquares();
+    for (const row of c.board()) for (const p of row) if (p && p.type === 'k' && p.color === c.turn()) return [p.square];
     return [];
   }
 
@@ -225,10 +282,11 @@ export class Game {
 
   renderBoard() {
     const s = this.settings;
-    const hist = this.chess.history({ verbose: true });
+    const c = this.src();
+    const hist = c.history({ verbose: true });
     const last = hist[hist.length - 1];
-    const checkSet = new Set(this.checkSquares());
-    const board = this.chess.board();
+    const checkSet = new Set(this.checkSquares(c));
+    const board = c.board();
     const at = {};
     for (const row of board) for (const p of row) if (p) at[p.square] = p;
 
@@ -275,7 +333,7 @@ export class Game {
 
   captured() {
     const got = { w: [], b: [] };   // pieces each side has captured
-    for (const m of this.chess.history({ verbose: true })) if (m.captured) got[m.color].push(m.captured);
+    for (const m of this.src().history({ verbose: true })) if (m.captured) got[m.color].push(m.captured);
     const val = (t) => this.geo.valueOf(t);
     for (const k of 'wb') got[k].sort((x, y) => val(y) - val(x));
     const sum = (arr) => arr.reduce((t, p) => t + val(p), 0);
@@ -316,6 +374,12 @@ export class Game {
 
   renderMoves() {
     const h = this.chess.history();
+    const cur = this.curPly;
+    this.root.querySelectorAll('.nav-row button').forEach((b) => {
+      const n = b.dataset.nav;
+      b.disabled = (n === 'first' || n === 'prev') ? cur === 0 : cur === h.length;
+    });
+    this.root.classList.toggle('viewing', this.view != null);
     if (!h.length) {
       this.listEl.innerHTML = '<li class="empty">Moves will show up here once the game starts.</li>';
       return;
@@ -323,15 +387,17 @@ export class Game {
     let html = '';
     for (let i = 0; i < h.length; i += 2) {
       const n = i / 2 + 1;
-      const cls = (idx) => (idx === h.length - 1 ? 'mv now' : 'mv');
-      html += `<li><span class="num">${n}</span><span class="${cls(i)}">${h[i]}</span>${h[i + 1] ? `<span class="${cls(i + 1)}">${h[i + 1]}</span>` : ''}</li>`;
+      const cls = (ply) => (ply === cur ? 'mv now' : 'mv');
+      html += `<li><span class="num">${n}</span><button type="button" class="${cls(i + 1)}" data-ply="${i + 1}">${h[i]}</button>${h[i + 1] ? `<button type="button" class="${cls(i + 2)}" data-ply="${i + 2}">${h[i + 1]}</button>` : ''}</li>`;
     }
     this.listEl.innerHTML = html;
-    this.listEl.scrollTop = this.listEl.scrollHeight;
+    const now = this.listEl.querySelector('.now');
+    if (now && this.view != null) now.scrollIntoView({ block: 'nearest' }); else this.listEl.scrollTop = this.listEl.scrollHeight;
   }
 
   renderStatus() {
     let t = '';
+    if (this.view != null) { this.statusEl.textContent = `Viewing move ${this.view} of ${this.plies}`; return; }
     if (this.over) t = 'Game over';
     else if (this.cfg.mode === 'bot') t = this.botThinking ? 'Bot is thinking…' : this.chess.turn() === this.humanColor ? 'Your move' : '';
     else t = this.chess.turn() === 'w' ? 'White to move' : 'Black to move';
@@ -475,7 +541,7 @@ export class Game {
     }
     this.checkEnd();
     this.render();
-    if (animate) this.animateLast(mv.from);
+    if (animate && this.view == null) this.animateLast(mv.from);
     if (!this.over) {
       const kind = this.chess.inCheck() ? 'check' : mv.promotion ? 'promote'
         : mv.captured ? 'capture' : (mv.flags.includes('k') || mv.flags.includes('q')) ? 'castle' : 'move';
@@ -516,6 +582,11 @@ export class Game {
       if (a === 'new') this.hooks.onNew?.();
     };
     this.actionsEl.hidden = true;
+    this.hooks.onFinish?.({
+      mode: this.cfg.mode, custom: this.custom, board: this.cfg.variant?.name || null, winner, reason,
+      humanColor: this.humanColor, elo: this.cfg.mode === 'bot' ? this.cfg.elo : null,
+      plies: this.chess.history().length, time: this.cfg.time, date: Date.now(),
+    });
     this.selected = null;
     this.targets.clear();
     this.render();
@@ -627,6 +698,7 @@ export class Game {
   toast(msg) { toast(msg, 7000); }
 
   destroy() {
+    document.removeEventListener('keydown', this.onKey);
     clearInterval(this.timer);
     this.token++;
     this.root.remove();

@@ -272,8 +272,8 @@ export class PixelEditor {
   toDataURL() { return this.canvas.toDataURL('image/png'); }
 }
 
-// Darkened copy of an image (used to auto-make the black version of a piece).
-export function darkenDataURL(src) {
+// Copy of an image with its colors inverted (transparency stays). Used to auto-make the black version.
+export function invertDataURL(src) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -283,11 +283,7 @@ export function darkenDataURL(src) {
       x.drawImage(img, 0, 0, PX, PX);
       const data = x.getImageData(0, 0, PX, PX);
       const d = data.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const l = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11);
-        const k = 0.22 + (l / 255) * 0.12;
-        d[i] = d[i] * k + 6; d[i + 1] = d[i + 1] * k + 6; d[i + 2] = d[i + 2] * k + 12;
-      }
+      for (let i = 0; i < d.length; i += 4) { d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2]; }
       x.putImageData(data, 0, 0);
       resolve(c.toDataURL('image/png'));
     };

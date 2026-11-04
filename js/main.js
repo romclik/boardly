@@ -4,8 +4,9 @@ import { SITE_THEMES, BOARD_THEMES, applyThemes } from './themes.js';
 import { MINUTES, INCS, PRESETS, timeLabel, category, nearestIndex, minLabel } from './time.js';
 import * as sfx from './sound.js';
 import { createPage } from './create.js';
-import { allBoards, boardById, pieceById, resolveVariant } from './library.js';
-import { thumbBoard } from './boardview.js';
+import { allBoards, boardById, pieceById, resolveVariant, customPieces, customBoards } from './library.js';
+import { dropdown } from './dropdown.js';
+import { thumbBoard, createGrid, setPiece } from './boardview.js';
 import { openCustomSetup } from './customsetup.js';
 import { toast } from './ui.js';
 
@@ -38,6 +39,7 @@ const setup = { mode: 'bot', gamemode: 'Classic', time: '15+10', elo: 1800, colo
 const saveSetup = () => store.set('setup', setup);
 
 let game = null;
+let autoOpenCustom = false;   // set by the Home tiles so the Custom popup opens right away
 let customEdit = null;      // an edited position for the next Custom game: { boardId, setupId, pieces }
 const view = document.getElementById('view');
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -70,20 +72,137 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 // ---------- Home ----------
+const TIPS = [
+  'Fight for the center early. Pawns and pieces there reach everywhere.',
+  'Develop your knights and bishops before moving the same piece twice.',
+  'Before every move ask: what is my opponent threatening?',
+  'Look for checks, captures and threats first, then quieter moves.',
+  'Rooks love open files. Put them where pawns have gone.',
+  'A knight in the corner sees only two squares. Keep knights near the center.',
+  'When you are ahead in material, trade pieces. When behind, keep the game complicated.',
+  'In the endgame your king turns into a strong piece. Bring it to the center.',
+  'Never leave a piece undefended if you can help it.',
+  'Slow down on the clock: most blunders happen in a hurry.',
+  'Try Custom mode: give a pawn knight moves and see what happens.',
+  'Every piece you create can be tested on an empty board before you save it.',
+  'Export your creations now and then. The file is your backup.',
+  'Playing a bot below 1000 Elo? Practice spotting its mistakes and punish them.',
+];
+
+const HIST_MAX = 50;
+let history = store.get('history', []);
+function recordGame(info) {
+  history.unshift(info);
+  history.length = Math.min(history.length, HIST_MAX);
+  store.set('history', history);
+}
+
+function ago(ts) {
+  const d = Math.floor((Date.now() - ts) / 86400000);
+  if (d <= 0) return 'Today';
+  if (d === 1) return 'Yesterday';
+  if (d < 30) return `${d} days ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function outcome(g) {
+  if (g.mode === 'bot') {
+    if (g.winner === null) return { tag: 'Draw', cls: 'draw' };
+    return g.winner === g.humanColor ? { tag: 'Win', cls: 'win' } : { tag: 'Loss', cls: 'lose' };
+  }
+  return g.winner === null ? { tag: 'Draw', cls: 'draw' } : { tag: g.winner === 'w' ? 'White' : 'Black', cls: 'friend' };
+}
+
 function home() {
+  const name = esc(settings.name || 'player');
+  const resume = game && game.active;
+  const day = Math.floor(Date.now() / 86400000);
+  const tip = TIPS[day % TIPS.length];
+  const bots = history.filter((g) => g.mode === 'bot');
+  const wins = bots.filter((g) => g.winner === g.humanColor);
+  const best = wins.reduce((t, g) => Math.max(t, g.elo || 0), 0);
+  const draws = bots.filter((g) => g.winner === null).length;
+  const mine = { pieces: customPieces(), boards: customBoards() };
+  const art = (a, b, cls = '') => `<div class="tile-art ${cls}" aria-hidden="true"><div class="tile-board"></div><img class="tp tp-k" src="${a}" alt=""><img class="tp tp-b" src="${b}" alt=""></div>`;
+
   view.innerHTML = `
     <div class="page-head">
       <h1 class="page-title">HOME</h1>
-      <p class="page-sub">Welcome, ${esc(settings.name || 'player')}</p>
+      <p class="page-sub">Welcome, ${name}</p>
     </div>
-    <a class="tile" href="#/play" aria-label="Play chess">
-      <div class="tile-art" aria-hidden="true">
-        <div class="tile-board"></div>
-        <img class="tp tp-k" src="pieces/wK.svg" alt="">
-        <img class="tp tp-b" src="pieces/bB.svg" alt="">
+
+    <section class="hero">
+      <div class="hero-text">
+        <h2>${resume ? 'Your game is waiting' : 'Ready for your next game?'}</h2>
+        <p>${resume ? 'Pick up right where you left off.' : 'Challenge a Stockfish bot, play a friend on the same screen, or invent your own pieces and boards.'}</p>
+        <div class="hero-actions">
+          <a class="btn primary cta" href="#/play" id="h-play">${resume ? 'Resume game' : 'Play now'}</a>
+          <a class="btn ghost cta" href="#/create">Create something</a>
+        </div>
       </div>
-      <div class="tile-label">PLAY</div>
-    </a>`;
+      <div class="hero-art" aria-hidden="true">
+        <div class="tile-board"></div>
+        <img class="hp hp1" src="pieces/wK.svg" alt=""><img class="hp hp2" src="pieces/bB.svg" alt="">
+        <img class="hp hp3" src="pieces/wN.svg" alt=""><img class="hp hp4" src="pieces/bQ.svg" alt="">
+      </div>
+    </section>
+
+    <h3 class="home-h">Jump in</h3>
+    <div class="tiles">
+      <a class="tile" href="#/play" data-go="bot" aria-label="Play against a bot">${art('pieces/wK.svg', 'pieces/bB.svg')}<div class="tile-label">BOT<small>Stockfish, 100 to 3200 Elo</small></div></a>
+      <a class="tile" href="#/play" data-go="friend" aria-label="Play with a friend">${art('pieces/wN.svg', 'pieces/bN.svg', 'alt1')}<div class="tile-label">FRIEND<small>Two players, one screen</small></div></a>
+      <a class="tile" href="#/play" data-go="custom" aria-label="Play a custom game">${art(mine.pieces[0]?.img.w || 'pieces/wR.svg', mine.pieces[0]?.img.b || 'pieces/bP.svg', 'alt2')}<div class="tile-label">CUSTOM<small>Your boards and pieces</small></div></a>
+      <a class="tile" href="#/create" aria-label="Create pieces and boards">${art('pieces/wQ.svg', 'pieces/bR.svg', 'alt3')}<div class="tile-label">CREATE<small>Draw pieces, shape boards</small></div></a>
+    </div>
+
+    <div class="home-grid">
+      <section class="hcard" aria-labelledby="hs">
+        <h3 id="hs">Your stats</h3>
+        ${history.length ? `
+        <div class="stat-grid">
+          <div><b>${history.length}</b><span>games played</span></div>
+          <div><b>${wins.length}</b><span>wins vs bot</span></div>
+          <div><b>${draws}</b><span>draws vs bot</span></div>
+          <div><b>${bots.length - wins.length - draws}</b><span>losses vs bot</span></div>
+        </div>
+        ${best ? `<p class="muted">Strongest bot beaten: <b>${best} Elo</b></p>` : '<p class="muted">Beat a bot to set your record.</p>'}` : '<p class="muted">Play your first game and your stats will show up here.</p>'}
+      </section>
+
+      <section class="hcard" aria-labelledby="hr">
+        <h3 id="hr">Recent games</h3>
+        ${history.length ? `<ul class="recent">${history.slice(0, 5).map((g) => {
+    const o = outcome(g);
+    const who = g.mode === 'bot' ? `Bot (${g.elo})` : 'Friend';
+    return `<li><span class="res ${o.cls}">${o.tag}</span><span class="rt"><b>${who}${g.custom ? ' · Custom' : ''}</b><small>${ago(g.date)} · ${Math.ceil(g.plies / 2)} moves</small></span></li>`;
+  }).join('')}</ul>` : '<p class="muted">No games yet.</p>'}
+      </section>
+
+      <section class="hcard tipcard" aria-labelledby="ht">
+        <h3 id="ht">Tip of the day</h3>
+        <p class="tip">${esc(tip)}</p>
+      </section>
+
+      <section class="hcard" aria-labelledby="hm">
+        <h3 id="hm">Your creations</h3>
+        ${mine.pieces.length || mine.boards.length ? `
+        <p class="muted">${mine.pieces.length} piece${mine.pieces.length === 1 ? '' : 's'} · ${mine.boards.length} board${mine.boards.length === 1 ? '' : 's'}</p>
+        <div class="mine-row">${mine.pieces.slice(0, 6).map((p) => `<a href="#/create/piece/${encodeURIComponent(p.id)}" title="${esc(p.name)}"><img src="${esc(p.img.w)}" alt="${esc(p.name)}"></a>`).join('')}</div>
+        <a class="link-btn" href="#/create">Open Create →</a>` : `
+        <p class="muted">Nothing yet. Make a piece that moves any way you like, then a board to play it on.</p>
+        <a class="btn primary sm" href="#/create/piece/new">Make your first piece</a>`}
+      </section>
+    </div>`;
+
+  view.querySelectorAll('[data-go]').forEach((a) => a.addEventListener('click', (e) => {
+    if (game && game.over) { game.destroy(); game = null; updateLive(); }
+    if (game && game.active) { toast('Finish or resign your current game first.'); return; }
+    const go = a.dataset.go;
+    setup.gamemode = go === 'custom' ? 'Custom' : 'Classic';
+    if (go !== 'custom') setup.mode = go;
+    saveSetup();
+    if (go === 'custom') autoOpenCustom = true;
+  }));
+  view.querySelector('#h-play').addEventListener('click', () => { if (game && game.over) { game.destroy(); game = null; updateLive(); } });
 }
 
 // ---------- Play ----------
@@ -162,6 +281,7 @@ function play() {
     }));
   }
   view.querySelector('#start').addEventListener('click', startGame);
+  if (autoOpenCustom && custom) { autoOpenCustom = false; openCustomDialog(); }
 }
 
 function openCustomDialog() {
@@ -202,6 +322,7 @@ function startGame() {
     settings,
     {
       onChange: updateLive,
+      onFinish: recordGame,
       onNew: () => { game?.destroy(); game = null; updateLive(); route(); },
       onRematch: () => { game?.destroy(); game = null; startGame(); },
     },
@@ -276,52 +397,46 @@ function timePopup(onSave) {
 
 // ---------- Settings ----------
 function settingsPage() {
-  const toggles = [
+  const gameplay = [
     ['hints', 'Show legal moves', 'Mark where the selected piece can go.'],
     ['lastMove', 'Highlight last move', 'Tint the squares of the most recent move.'],
     ['animate', 'Animate pieces', 'Slide pieces across the board.'],
     ['autoFlip', 'Flip board after each move', 'For friend games on one screen. Turns the board toward whoever is moving.'],
   ];
+  const sw = {
+    site: (t) => `<span class="dotc" style="background:linear-gradient(135deg, ${t.hi}, ${t.main} 60%, ${t.sel})"></span>`,
+    board: (t) => `<span class="sw" style="--l:${t.l};--d:${t.d}"><i></i><i></i><i></i><i></i></span>`,
+  };
+  const row = (title, desc, control) => `<div class="srow"><span><span class="s-title">${title}</span><span class="s-desc">${desc}</span></span>${control}</div>`;
+  const toggle = (k, t, d) => row(t, d, `<input class="switch" type="checkbox" role="switch" aria-label="${t}" data-k="${k}"${settings[k] ? ' checked' : ''}>`);
+
   view.innerHTML = `
     <div class="page-head">
       <h1 class="page-title">SETTINGS</h1>
       <p class="page-sub">Make Boardly yours</p>
     </div>
     <div class="settings">
-      <label class="srow stack"><span class="s-title">Your name</span>
-        <input class="text" id="s-name" maxlength="20" value="${esc(settings.name)}" placeholder="player" autocomplete="nickname"></label>
+      <section class="cat" aria-labelledby="c-prof"><h2 id="c-prof" class="cat-title">Profile</h2>
+        <div class="srow stack"><label class="s-title" for="s-name">Your name</label><input class="text" id="s-name" maxlength="20" value="${esc(settings.name)}" placeholder="player" autocomplete="nickname"></div>
+      </section>
 
-      <div class="srow stack"><span class="s-title">Site theme</span>
-        <span class="s-desc">Changes the main color across Boardly.</span>
-        <div class="swatches" id="site-themes" role="radiogroup" aria-label="Site theme">
-          ${SITE_THEMES.map((t) => `
-            <button class="swatch" role="radio" aria-checked="${settings.accent === t.id}" data-id="${t.id}" title="${t.name}">
-              <span class="dotc" style="background:linear-gradient(135deg, ${t.hi}, ${t.main} 60%, ${t.sel})"></span>${t.name}
-            </button>`).join('')}
-        </div>
-      </div>
+      <section class="cat" aria-labelledby="c-app"><h2 id="c-app" class="cat-title">Appearance</h2>
+        ${row('Site theme', 'The main color of buttons, highlights and sliders.', '<span id="dd-site"></span>')}
+        ${row('Board theme', 'Colors of the squares.', '<span id="dd-board"></span>')}
+        <div class="srow preview-row"><span class="s-title">Preview</span><div id="theme-prev"></div></div>
+      </section>
 
-      <div class="srow stack"><span class="s-title">Board theme</span>
-        <span class="s-desc">Colors of the squares.</span>
-        <div class="swatches" id="board-themes" role="radiogroup" aria-label="Board theme">
-          ${BOARD_THEMES.map((t) => `
-            <button class="swatch" role="radio" aria-checked="${settings.board === t.id}" data-id="${t.id}" title="${t.name}">
-              <span class="sw" style="--l:${t.l};--d:${t.d}"><i></i><i></i><i></i><i></i></span>${t.name}
-            </button>`).join('')}
-        </div>
-      </div>
+      <section class="cat" aria-labelledby="c-snd"><h2 id="c-snd" class="cat-title">Sound</h2>
+        ${toggle('sound', 'Sound effects', 'Piece sounds, checks and game results.')}
+        <div class="srow stack"><label class="s-title" for="s-vol">Volume</label>
+          <div class="range plain" style="--pct:${settings.volume / 100}"><input id="s-vol" type="range" min="0" max="100" step="5" value="${settings.volume}"></div></div>
+      </section>
 
-      <label class="srow"><span><span class="s-title">Sound effects</span><span class="s-desc">Piece sounds, checks and game results.</span></span>
-        <input class="switch" type="checkbox" role="switch" data-k="sound"${settings.sound ? ' checked' : ''}></label>
-      <div class="srow stack"><label class="s-title" for="s-vol">Volume</label>
-        <div class="range plain" style="--pct:${settings.volume / 100}"><input id="s-vol" type="range" min="0" max="100" step="5" value="${settings.volume}"></div>
-      </div>
+      <section class="cat" aria-labelledby="c-play"><h2 id="c-play" class="cat-title">Gameplay</h2>
+        ${gameplay.map(([k, t, d]) => toggle(k, t, d)).join('')}
+      </section>
 
-      ${toggles.map(([k, t, d]) => `
-        <label class="srow"><span><span class="s-title">${t}</span><span class="s-desc">${d}</span></span>
-          <input class="switch" type="checkbox" role="switch" data-k="${k}"${settings[k] ? ' checked' : ''}></label>`).join('')}
-
-      <p class="foot">Boardly 2026. Made by Claude. v2.1.1</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.2</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });
@@ -332,14 +447,22 @@ function settingsPage() {
   const vol = view.querySelector('#s-vol');
   vol.addEventListener('input', () => { settings.volume = +vol.value; vol.parentElement.style.setProperty('--pct', vol.value / 100); saveSettings(); });
   vol.addEventListener('change', () => sfx.play('capture', settings));
-  const pick = (groupId, key) => view.querySelectorAll(`#${groupId} .swatch`).forEach((b) => b.addEventListener('click', () => {
-    settings[key] = b.dataset.id;
-    applyThemes(settings);
-    saveSettings();
-    view.querySelectorAll(`#${groupId} .swatch`).forEach((x) => x.setAttribute('aria-checked', x === b));
+
+  // theme dropdowns
+  view.querySelector('#dd-site').replaceWith(dropdown({
+    label: 'Site theme', value: settings.accent, items: SITE_THEMES.map((t) => ({ id: t.id, name: t.name, swatch: sw.site(t) })),
+    onChange: (id) => { settings.accent = id; applyThemes(settings); saveSettings(); },
   }));
-  pick('site-themes', 'accent');
-  pick('board-themes', 'board');
+  view.querySelector('#dd-board').replaceWith(dropdown({
+    label: 'Board theme', value: settings.board, items: BOARD_THEMES.map((t) => ({ id: t.id, name: t.name, swatch: sw.board(t) })),
+    onChange: (id) => { settings.board = id; applyThemes(settings); saveSettings(); },
+  }));
+
+  // little board that follows the chosen colors
+  const g = createGrid({ w: 6, h: 3, cell: 44, cells: Array.from({ length: 3 }, () => Array(6).fill(true)) });
+  g.el.classList.add('thumb');
+  [[1, 0, 'bK'], [3, 0, 'bQ'], [4, 1, 'bP'], [1, 2, 'wN'], [2, 2, 'wB'], [4, 2, 'wK']].forEach(([x, y, p]) => setPiece(g.at(x, y), `pieces/${p}.svg`));
+  view.querySelector('#theme-prev').append(g.el);
 }
 
 route();
