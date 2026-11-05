@@ -8,7 +8,7 @@
 // BOARD  { id, name, w, h, cells:[rowString...] (top row first, '1' = square exists),
 //          setups:[{ id, name, pieces:[[x, y, pieceId, 'w'|'b'], ...] }] }
 
-export const APP_VERSION = '2.3';
+export const APP_VERSION = '2.3.1';
 export const MAX_SIZE = 16;
 const IMG_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 const MAX_IMG = 160000;

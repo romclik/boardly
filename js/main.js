@@ -442,7 +442,7 @@ function settingsPage() {
         ${gameplay.map(([k, t, d]) => toggle(k, t, d)).join('')}
       </section>
 
-      <p class="foot">Boardly 2026. Made by Claude. v2.3</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.3.1</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });

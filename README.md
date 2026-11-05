@@ -18,7 +18,7 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - Custom games have no castling. En passant and promotion work for pieces that have those options turned on.
 - In a Custom game you can edit the starting position for that game, including positions that could never happen in real chess. A side that loses its royal piece loses the game.
 - Custom game rules (in the Custom popup): **King capture** removes check, checkmate and stalemate. You can move into check, whoever captures a king wins, and a side with no moves skips its turn. **No draws** turns off threefold repetition, the 50-move rule, draw by too few pieces and draw offers. Stalemate still ends the game as a draw unless King capture is on.
-- Drawing on the board: right-click a square for a red mark (Ctrl yellow, Alt blue, Shift green). Right-click and drag for an arrow: yellow by default (Ctrl red, Alt blue, Shift green). Knight-shaped drags make L-shaped arrows. Drawings disappear on a left-click, on the next move, or with Escape. On touch screens use the "Draw" button under the move list and drag with a finger.
+- Drawing on the board: right-click a square for a red mark (Ctrl yellow, Alt blue, Shift green). Right-click and drag for an arrow: yellow by default (Ctrl red, Alt blue, Shift green). Knight-shaped drags make L-shaped arrows. Drawings disappear on a left-click, on the next move, or with Escape.
 - Settings, your stats, your pieces and your boards are stored in your browser. Clearing site data removes them, so use Export for a backup.
 - Third-party code: Stockfish (GPLv3, see `engine/Copying.txt`) and chess.js (BSD-2, see `vendor/chess.js.LICENSE`).
 
@@ -30,6 +30,10 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v2.3.1
+- Removed the "Draw" and "Clear drawings" buttons. Drawing on the board is right-click only.
+- King capture mode: attacked kings get the red outline and the check sound again. Moves are marked "+" when they attack the opponent's king and "-" when they leave your own king attacked. Move hints that would leave your king attacked are red.
+
 ### v2.3
 - Custom games: **King capture** and **No draws** options in the Custom popup.
 - Arrows and highlighted squares on the board (right-click, like chess.com), plus a "Draw" button for touch screens.

@@ -756,11 +756,13 @@ details.adv[open] summary { margin-bottom: 4px; }
 
 /* ---------- v2.3 drawing layer ---------- */
 .marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 6; overflow: visible; }
-.board.annotating { cursor: crosshair; }
-.draw-toggle[aria-pressed='true'] { color: var(--purple-hi); text-decoration: underline; text-underline-offset: 4px; }
 .moves-list .pass { font-size: 10px; margin-left: 3px; color: #ffd43b; }
 .moves-list .gap { color: var(--muted); padding: 3px 10px; margin-left: -10px; }
 
 .cs-rules { margin-top: 10px; }
 .cs-rules .opt { margin-bottom: 6px; }
 .modal-card.xl .modal-actions { position: sticky; bottom: -26px; background: var(--panel); padding: 14px 0 4px; margin-top: 8px; z-index: 2; }
+
+/* v2.3.1: moves that would leave your own king attacked are shown in red */
+.sq.dest.bad::after { background: rgba(232, 58, 58, .82); }
+.sq.dest-cap.bad::after { border-color: rgba(232, 58, 58, .92); }

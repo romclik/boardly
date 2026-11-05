@@ -244,13 +244,26 @@ export class CustomChess {
   moves(opts = {}) {
     let list = this.legalInternal();
     if (opts.square) { const i = this.idxOf(opts.square); list = list.filter((m) => m.from === i); }
+    if (opts.verbose && opts.square && this.rules.kingCapture) {
+      return list.map((m) => {
+        const v = this.verbose(m);
+        const rec = this.make(m);
+        v.unsafe = this.hasCheck(m.c);          // the mover's own royal would be attacked afterwards
+        this.unmake(rec);
+        return v;
+      });
+    }
     return opts.verbose ? list.map((m) => this.verbose(m)) : list.map((m) => this.sqName(m.from) + this.sqName(m.to));
   }
   inCheck() { return !this.rules.kingCapture && this.hasCheck(this.turn_); }
+  // Squares of royal pieces that are currently attacked (either side). Used for the red outline and the check sound.
   checkedSquares() {
-    if (this.rules.kingCapture) return [];
-    const by = other(this.turn_);
-    return this.royals(this.turn_).filter((r) => this.attacked(r, by)).map((i) => this.sqName(i));
+    const out = [];
+    for (const c of ['w', 'b']) {
+      const by = other(c);
+      for (const r of this.royals(c)) if (this.attacked(r, by)) out.push(this.sqName(r));
+    }
+    return out;
   }
   annihilated() {
     return !this.b.some((p) => p && p.c === this.turn_);
@@ -296,7 +309,12 @@ export class CustomChess {
     this.keys.push(this.key());
     let suffix = '';
     if (this.isCheckmate() && (!this.annihilated() || this.royalLost())) suffix = '#';
-    else if (this.inCheck()) suffix = '+';
+    else if (this.rules.kingCapture) {
+      // no real check in this mode, but attacks on a king are still shown: "+" you attack their king, "-" your own king is attacked
+      const foe = other(mv.c);
+      if (this.royals(foe).some((x) => this.attacked(x, mv.c))) suffix += '+';
+      if (this.royals(mv.c).some((x) => this.attacked(x, foe))) suffix += '-';
+    } else if (this.inCheck()) suffix = '+';
     let passed = false;
     if (this.rules.kingCapture && !this.isCheckmate() && this.legalInternal().length === 0 && this.pseudo(other(this.turn_)).length > 0) {
       this.turn_ = other(this.turn_);          // the side that cannot move skips its turn

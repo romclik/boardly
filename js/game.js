@@ -89,7 +89,6 @@ export class Game {
     this.rules = this.custom ? (cfg.variant.rules || {}) : {};
     this.marks = { squares: new Map(), arrows: [] };     // right-click drawings
     this.markDrag = null;
-    this.annotMode = false;
     this.view = null;                // null = live position, otherwise how many plies are shown
     this.viewChess = null;
     this.build();
@@ -205,11 +204,6 @@ export class Game {
       return b;
     };
     if (this.cfg.mode === 'friend') mk('Flip board', 'link-btn', () => this.flip());
-    this.btnDraw = mk('Draw', 'link-btn draw-toggle', () => this.toggleAnnot());
-    this.btnDraw.title = 'Right-click and drag on the board to draw arrows, right-click a square to mark it. Turn this on to draw with a normal click instead.';
-    this.btnDraw.setAttribute('aria-pressed', 'false');
-    this.btnClear = mk('Clear drawings', 'link-btn', () => this.clearMarks());
-    this.btnClear.hidden = true;
     this.btnsGame = [];
     if (this.cfg.mode === 'friend' && !this.rules.noDraw) this.btnsGame.push(mk('Offer draw', 'link-btn', () => this.confirmDraw()));
     this.btnsGame.push(mk('Resign', 'link-btn danger', () => this.confirmResign()));
@@ -235,13 +229,6 @@ export class Game {
     this.marks.arrows = [];
     this.markDrag = null;
     if (render) this.renderMarks();
-  }
-
-  toggleAnnot() {
-    this.annotMode = !this.annotMode;
-    this.btnDraw.setAttribute('aria-pressed', this.annotMode);
-    this.boardEl.classList.toggle('annotating', this.annotMode);
-    if (this.annotMode) { this.selected = null; this.targets.clear(); this.renderBoard(); }
   }
 
   markColor(mods, kind) {
@@ -333,7 +320,6 @@ export class Game {
     if (d && d.from !== d.to) out += this.arrowSvg(d.from, d.to, this.markColor(d.mods, 'arrow'), 0.55);
     else if (d) { const { c, r } = this.cellOf(d.from); out += `<rect x="${c}" y="${r}" width="1" height="1" fill="${this.markColor(d.mods, 'square')}" fill-opacity="0.35"/>`; }
     this.marksEl.innerHTML = out;
-    if (this.btnClear) this.btnClear.hidden = !this.hasMarks();
   }
 
   // ---------- browsing earlier moves ----------
@@ -384,8 +370,8 @@ export class Game {
   }
 
   checkSquares(c = this.chess) {
-    if (!c.inCheck()) return [];
     if (this.custom) return c.checkedSquares();
+    if (!c.inCheck()) return [];
     for (const row of c.board()) for (const p of row) if (p && p.type === 'k' && p.color === c.turn()) return [p.square];
     return [];
   }
@@ -423,6 +409,7 @@ export class Game {
       const t = this.targets.get(name);
       el.classList.toggle('dest', !!(s.hints && t && !t.cap));
       el.classList.toggle('dest-cap', !!(s.hints && t && t.cap));
+      el.classList.toggle('bad', !!(s.hints && t && t.unsafe));
       el.querySelector('img.pc')?.remove();
       const p = at[name];
       if (p) {
@@ -530,13 +517,13 @@ export class Game {
     if (this.over) t = 'Game over';
     else if (this.cfg.mode === 'bot') t = this.botThinking ? 'Bot is thinking…' : this.chess.turn() === this.humanColor ? 'Your move' : '';
     else t = this.chess.turn() === 'w' ? 'White to move' : 'Black to move';
-    if (!this.over && this.chess.inCheck()) t = (t ? t + ' · ' : '') + 'Check';
+    if (!this.over && this.checkSquares().length) t = (t ? t + ' · ' : '') + 'Check';
     this.statusEl.textContent = t;
   }
 
   // ---------- input ----------
   onDown(e) {
-    if (e.button === 2 || (this.annotMode && (e.button === undefined || e.button === 0))) { this.startMark(e); return; }
+    if (e.button === 2) { this.startMark(e); return; }
     if (e.button !== undefined && e.button > 0) return;
     if (this.hasMarks()) this.clearMarks();                    // a normal click wipes the drawings
     const sqEl = e.target.closest('.sq');
@@ -569,7 +556,7 @@ export class Game {
     this.selected = name;
     this.targets.clear();
     for (const m of this.chess.moves({ square: name, verbose: true })) {
-      this.targets.set(m.to, { cap: !!m.captured || m.flags.includes('e') });
+      this.targets.set(m.to, { cap: !!m.captured || m.flags.includes('e'), unsafe: !!m.unsafe });
     }
     this.renderBoard();
     const img = this.sq[name].querySelector('img.pc');
@@ -675,8 +662,9 @@ export class Game {
     this.render();
     if (animate && this.view == null) this.animateLast(mv.from);
     if (!this.over) {
-      const kind = this.chess.inCheck() ? 'check' : mv.promotion ? 'promote'
+      const kind = this.checkSquares().length ? 'check' : mv.promotion ? 'promote'
         : mv.captured ? 'capture' : (mv.flags.includes('k') || mv.flags.includes('q')) ? 'castle' : 'move';
+      this.lastSoundKind = kind;
       sfx.play(kind, this.settings);
       this.maybeBotMove();
     }
