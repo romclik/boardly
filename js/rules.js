@@ -13,6 +13,8 @@ export class CustomChess {
     this.w = variant.w;
     this.h = variant.h;
     this.cellRows = variant.cells;
+    // Optional rule changes: kingCapture = no check/checkmate/stalemate, kings can be captured; noDraw = no automatic draws.
+    this.rules = { kingCapture: !!variant.rules?.kingCapture, noDraw: !!variant.rules?.noDraw };
     this.playable = new Uint8Array(this.w * this.h);
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) this.playable[y * this.w + x] = variant.cells[y][x] === '1' ? 1 : 0;
     this.defsRaw = variant.pieces;
@@ -41,6 +43,8 @@ export class CustomChess {
     if (!skipSetup) {
       for (const [x, y, id, c] of variant.setup) if (this.defs[id]) this.b[y * this.w + x] = { t: id, c, m: false };
       this.hadRoyal = { w: this.royals('w').length > 0, b: this.royals('b').length > 0 };
+      // with king capture, a side that cannot move at the very start simply skips its first turn
+      if (this.rules.kingCapture && this.pseudo('w').length === 0 && this.pseudo('b').length > 0) this.turn_ = 'b';
       this.keys.push(this.key());
     }
   }
@@ -190,6 +194,7 @@ export class CustomChess {
   legalInternal() {
     if (this._legal) return this._legal;
     const color = this.turn_;
+    if (this.rules.kingCapture) { this._legal = this.pseudo(color); return this._legal; }   // anything goes, even into check
     const has = this.royals(color).length > 0;
     const out = [];
     for (const mv of this.pseudo(color)) {
@@ -241,8 +246,9 @@ export class CustomChess {
     if (opts.square) { const i = this.idxOf(opts.square); list = list.filter((m) => m.from === i); }
     return opts.verbose ? list.map((m) => this.verbose(m)) : list.map((m) => this.sqName(m.from) + this.sqName(m.to));
   }
-  inCheck() { return this.hasCheck(this.turn_); }
+  inCheck() { return !this.rules.kingCapture && this.hasCheck(this.turn_); }
   checkedSquares() {
+    if (this.rules.kingCapture) return [];
     const by = other(this.turn_);
     return this.royals(this.turn_).filter((r) => this.attacked(r, by)).map((i) => this.sqName(i));
   }
@@ -252,17 +258,23 @@ export class CustomChess {
   // A side that started with a royal piece and no longer has one has lost (possible in edited, "illegal" positions).
   royalLost() { return this.hadRoyal[this.turn_] && this.royals(this.turn_).length === 0; }
   isCheckmate() {
-    return this.annihilated() || this.royalLost() || (this.inCheck() && this.legalInternal().length === 0);
+    return this.annihilated() || this.royalLost() || (!this.rules.kingCapture && this.inCheck() && this.legalInternal().length === 0);
   }
-  isStalemate() { return !this.annihilated() && !this.royalLost() && !this.inCheck() && this.legalInternal().length === 0; }
+  isStalemate() {
+    if (this.annihilated() || this.royalLost()) return false;
+    // With king capture a side without moves just skips its turn; only if neither side can move is the game stuck.
+    if (this.rules.kingCapture) return this.legalInternal().length === 0 && this.pseudo(other(this.turn_)).length === 0;
+    return !this.inCheck() && this.legalInternal().length === 0;
+  }
   isInsufficientMaterial() {
-    return !this.b.some((p) => p && !this.defs[p.t].royal);
+    return !this.rules.noDraw && !this.b.some((p) => p && !this.defs[p.t].royal);
   }
   isThreefoldRepetition() {
+    if (this.rules.noDraw) return false;
     const k = this.keys[this.keys.length - 1];
     return this.keys.filter((x) => x === k).length >= 3;
   }
-  isDrawByFiftyMoves() { return this.hm >= 100; }
+  isDrawByFiftyMoves() { return !this.rules.noDraw && this.hm >= 100; }
   isGameOver() {
     return this.isCheckmate() || this.isStalemate() || this.isInsufficientMaterial() || this.isThreefoldRepetition() || this.isDrawByFiftyMoves();
   }
@@ -285,7 +297,16 @@ export class CustomChess {
     let suffix = '';
     if (this.isCheckmate() && (!this.annihilated() || this.royalLost())) suffix = '#';
     else if (this.inCheck()) suffix = '+';
+    let passed = false;
+    if (this.rules.kingCapture && !this.isCheckmate() && this.legalInternal().length === 0 && this.pseudo(other(this.turn_)).length > 0) {
+      this.turn_ = other(this.turn_);          // the side that cannot move skips its turn
+      this.ep = null;
+      this._legal = null;
+      this.keys[this.keys.length - 1] = this.key();
+      passed = true;
+    }
     const v = this.verbose(mv, san + suffix);
+    if (passed) v.passed = true;
     this.hist.push({ rec, v });
     return v;
   }
@@ -318,11 +339,11 @@ export class CustomChess {
     this.b.forEach((p, i) => { if (p) pieces.push([i, p.t, p.c, p.m ? 1 : 0]); });
     return {
       w: this.w, h: this.h, cells: this.cellRows, defs: this.defsRaw,
-      pieces, turn: this.turn_, ep: this.ep, hm: this.hm, hadRoyal: this.hadRoyal,
+      pieces, turn: this.turn_, ep: this.ep, hm: this.hm, hadRoyal: this.hadRoyal, rules: this.rules,
     };
   }
   static restore(s) {
-    const g = new CustomChess({ w: s.w, h: s.h, cells: s.cells, setup: [], pieces: s.defs }, true);
+    const g = new CustomChess({ w: s.w, h: s.h, cells: s.cells, setup: [], pieces: s.defs, rules: s.rules }, true);
     s.pieces.forEach(([i, t, c, m]) => { g.b[i] = { t, c, m: !!m }; });
     g.turn_ = s.turn; g.ep = s.ep; g.hm = s.hm; g.hadRoyal = s.hadRoyal || { w: false, b: false };
     return g;

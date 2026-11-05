@@ -86,6 +86,10 @@ export class Game {
     this.botThinking = false;
     this.token = 0;
     this.usingFallback = false;
+    this.rules = this.custom ? (cfg.variant.rules || {}) : {};
+    this.marks = { squares: new Map(), arrows: [] };     // right-click drawings
+    this.markDrag = null;
+    this.annotMode = false;
     this.view = null;                // null = live position, otherwise how many plies are shown
     this.viewChess = null;
     this.build();
@@ -114,6 +118,7 @@ export class Game {
         <div class="prow" data-pos="top"></div>
         <div class="board-wrap">
           <div class="board" role="grid" aria-label="Chess board"></div>
+          <svg class="marks" aria-hidden="true"></svg>
           <div class="promo" hidden></div>
         </div>
         <div class="prow" data-pos="bottom"></div>
@@ -142,7 +147,9 @@ export class Game {
     };
     this.buildBoard();
     this.buildActions();
+    this.marksEl = root.querySelector('.marks');
     this.boardEl.addEventListener('pointerdown', (e) => this.onDown(e));
+    this.boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
     root.querySelector('.nav-row').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-nav]');
       if (b) this.navigate(b.dataset.nav);
@@ -190,17 +197,22 @@ export class Game {
     a.textContent = '';
     const mk = (label, cls, fn) => {
       const b = document.createElement('button');
+      b.type = 'button';
       b.className = cls;
       b.textContent = label;
       b.addEventListener('click', fn);
       a.append(b);
       return b;
     };
-    if (this.cfg.mode === 'friend') {
-      mk('Flip board', 'link-btn', () => this.flip());
-      mk('Offer draw', 'link-btn', () => this.confirmDraw());
-    }
-    mk('Resign', 'link-btn danger', () => this.confirmResign());
+    if (this.cfg.mode === 'friend') mk('Flip board', 'link-btn', () => this.flip());
+    this.btnDraw = mk('Draw', 'link-btn draw-toggle', () => this.toggleAnnot());
+    this.btnDraw.title = 'Right-click and drag on the board to draw arrows, right-click a square to mark it. Turn this on to draw with a normal click instead.';
+    this.btnDraw.setAttribute('aria-pressed', 'false');
+    this.btnClear = mk('Clear drawings', 'link-btn', () => this.clearMarks());
+    this.btnClear.hidden = true;
+    this.btnsGame = [];
+    if (this.cfg.mode === 'friend' && !this.rules.noDraw) this.btnsGame.push(mk('Offer draw', 'link-btn', () => this.confirmDraw()));
+    this.btnsGame.push(mk('Resign', 'link-btn danger', () => this.confirmResign()));
   }
 
   // ---------- helpers ----------
@@ -213,6 +225,117 @@ export class Game {
     return { name: side === 'w' ? 'WHITE' : 'BLACK', elo: null };
   }
 
+  // ---------- arrows and highlighted squares (right-click, like chess.com) ----------
+  // squares: right-click = red, Ctrl yellow, Alt blue, Shift green.  arrows: right-click drag = yellow, Ctrl red, Alt blue, Shift green.
+  hasMarks() { return this.marks.squares.size > 0 || this.marks.arrows.length > 0; }
+
+  clearMarks(render = true) {
+    if (!this.hasMarks() && !this.markDrag) return;
+    this.marks.squares.clear();
+    this.marks.arrows = [];
+    this.markDrag = null;
+    if (render) this.renderMarks();
+  }
+
+  toggleAnnot() {
+    this.annotMode = !this.annotMode;
+    this.btnDraw.setAttribute('aria-pressed', this.annotMode);
+    this.boardEl.classList.toggle('annotating', this.annotMode);
+    if (this.annotMode) { this.selected = null; this.targets.clear(); this.renderBoard(); }
+  }
+
+  markColor(mods, kind) {
+    if (mods.shift) return '#3fb950';
+    if (mods.alt) return '#3b8bf2';
+    if (kind === 'arrow') return mods.ctrl ? '#eb4a4a' : '#f5b82e';
+    return mods.ctrl ? '#f5b82e' : '#eb4a4a';
+  }
+
+  sqFromPoint(x, y) {
+    const el = document.elementFromPoint(x, y)?.closest?.('.sq');
+    return el?.dataset.sq || null;
+  }
+
+  startMark(e) {
+    const from = this.sqFromPoint(e.clientX, e.clientY);
+    if (!from) return;
+    e.preventDefault();
+    const mods = { ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, shift: e.shiftKey };
+    this.markDrag = { from, to: from, mods };
+    const move = (ev) => {
+      const sq = this.sqFromPoint(ev.clientX, ev.clientY);
+      if (sq && sq !== this.markDrag.to) { this.markDrag.to = sq; this.renderMarks(); }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      const d = this.markDrag;
+      this.markDrag = null;
+      if (!d) return;
+      if (d.from === d.to) this.toggleSquareMark(d.from, this.markColor(d.mods, 'square'));
+      else this.toggleArrowMark(d.from, d.to, this.markColor(d.mods, 'arrow'));
+      this.renderMarks();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  toggleSquareMark(sq, color) {
+    if (this.marks.squares.get(sq) === color) this.marks.squares.delete(sq);
+    else this.marks.squares.set(sq, color);
+  }
+
+  toggleArrowMark(from, to, color) {
+    const i = this.marks.arrows.findIndex((a) => a.from === from && a.to === to);
+    if (i >= 0) {
+      if (this.marks.arrows[i].color === color) this.marks.arrows.splice(i, 1); else this.marks.arrows[i].color = color;
+    } else this.marks.arrows.push({ from, to, color });
+  }
+
+  // square name -> position on screen (column, row) for the current orientation
+  cellOf(name) {
+    const { w, h } = this.geo;
+    const x = CFILES.indexOf(name[0]);
+    const y = h - parseInt(name.slice(1), 10);
+    return this.orientation === 'w' ? { c: x, r: y } : { c: w - 1 - x, r: h - 1 - y };
+  }
+
+  arrowSvg(from, to, color, opacity) {
+    const a = this.cellOf(from), b = this.cellOf(to);
+    const p0 = { x: a.c + 0.5, y: a.r + 0.5 }, p1 = { x: b.c + 0.5, y: b.r + 0.5 };
+    const dc = Math.abs(b.c - a.c), dr = Math.abs(b.r - a.r);
+    const knight = (dc === 1 && dr === 2) || (dc === 2 && dr === 1);
+    const pts = knight ? [p0, dc > dr ? { x: p1.x, y: p0.y } : { x: p0.x, y: p1.y }, p1] : [p0, p1];
+    const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+    const len = Math.hypot(last.x - prev.x, last.y - prev.y) || 1;
+    const ux = (last.x - prev.x) / len, uy = (last.y - prev.y) / len;
+    const head = 0.46, tip = { x: last.x - ux * 0.04, y: last.y - uy * 0.04 };
+    const base = { x: tip.x - ux * head, y: tip.y - uy * head };
+    const line = [...pts.slice(0, -1), base].map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' ');
+    const hw = 0.27, px = -uy, py = ux;
+    const tri = `${tip.x},${tip.y} ${base.x + px * hw},${base.y + py * hw} ${base.x - px * hw},${base.y - py * hw}`;
+    return `<g opacity="${opacity}"><polyline points="${line}" fill="none" stroke="${color}" stroke-width="0.17" stroke-linecap="round" stroke-linejoin="round"/><polygon points="${tri}" fill="${color}"/></g>`;
+  }
+
+  renderMarks() {
+    const { w, h } = this.geo;
+    this.marksEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    this.marksEl.setAttribute('preserveAspectRatio', 'none');
+    let out = '';
+    this.marks.squares.forEach((color, sq) => {
+      const { c, r } = this.cellOf(sq);
+      out += `<rect x="${c}" y="${r}" width="1" height="1" fill="${color}" fill-opacity="0.55"/>`;
+    });
+    this.marks.arrows.forEach((a) => { out += this.arrowSvg(a.from, a.to, a.color, 0.85); });
+    const d = this.markDrag;
+    if (d && d.from !== d.to) out += this.arrowSvg(d.from, d.to, this.markColor(d.mods, 'arrow'), 0.55);
+    else if (d) { const { c, r } = this.cellOf(d.from); out += `<rect x="${c}" y="${r}" width="1" height="1" fill="${this.markColor(d.mods, 'square')}" fill-opacity="0.35"/>`; }
+    this.marksEl.innerHTML = out;
+    if (this.btnClear) this.btnClear.hidden = !this.hasMarks();
+  }
+
   // ---------- browsing earlier moves ----------
   get plies() { return this.chess.history().length; }
   get curPly() { return this.view ?? this.plies; }
@@ -222,6 +345,7 @@ export class Game {
     const len = this.plies;
     n = Math.max(0, Math.min(len, n));
     this.closePromotion?.();
+    this.clearMarks(false);
     this.selected = null;
     this.targets.clear();
     if (n >= len) { this.view = null; this.viewChess = null; }
@@ -246,6 +370,7 @@ export class Game {
   handleKey(e) {
     if (!this.root.isConnected || document.querySelector('.modal')) return;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'Escape' && this.hasMarks()) { this.clearMarks(); return; }
     const k = { ArrowLeft: 'prev', ArrowRight: 'next', Home: 'first', End: 'live' }[e.key];
     if (!k) return;
     e.preventDefault();
@@ -274,6 +399,7 @@ export class Game {
   // ---------- rendering ----------
   render() {
     this.renderBoard();
+    this.renderMarks();
     this.renderBars();
     this.renderMoves();
     this.renderStatus();
@@ -373,24 +499,27 @@ export class Game {
   }
 
   renderMoves() {
-    const h = this.chess.history();
+    const hv = this.chess.history({ verbose: true });
     const cur = this.curPly;
     this.root.querySelectorAll('.nav-row button').forEach((b) => {
       const n = b.dataset.nav;
-      b.disabled = (n === 'first' || n === 'prev') ? cur === 0 : cur === h.length;
+      b.disabled = (n === 'first' || n === 'prev') ? cur === 0 : cur === hv.length;
     });
     this.root.classList.toggle('viewing', this.view != null);
-    if (!h.length) {
+    if (!hv.length) {
       this.listEl.innerHTML = '<li class="empty">Moves will show up here once the game starts.</li>';
       return;
     }
-    let html = '';
-    for (let i = 0; i < h.length; i += 2) {
-      const n = i / 2 + 1;
-      const cls = (ply) => (ply === cur ? 'mv now' : 'mv');
-      html += `<li><span class="num">${n}</span><button type="button" class="${cls(i + 1)}" data-ply="${i + 1}">${h[i]}</button>${h[i + 1] ? `<button type="button" class="${cls(i + 2)}" data-ply="${i + 2}">${h[i + 1]}</button>` : ''}</li>`;
-    }
-    this.listEl.innerHTML = html;
+    const cell = (i) => `<button type="button" class="${i + 1 === cur ? 'mv now' : 'mv'}" data-ply="${i + 1}">${hv[i].san}${hv[i].passed ? '<sup class="pass" title="The other side has no moves and skips its turn">pass</sup>' : ''}</button>`;
+    // rows by colour, so a skipped turn doesn't shift the columns
+    const rows = [];
+    hv.forEach((m, i) => {
+      const last = rows[rows.length - 1];
+      if (m.color === 'w') rows.push({ w: cell(i), b: '' });
+      else if (last && last.w && !last.b) last.b = cell(i);
+      else rows.push({ w: '<span class="gap">…</span>', b: cell(i) });
+    });
+    this.listEl.innerHTML = rows.map((r, k) => `<li><span class="num">${k + 1}</span>${r.w}${r.b}</li>`).join('');
     const now = this.listEl.querySelector('.now');
     if (now && this.view != null) now.scrollIntoView({ block: 'nearest' }); else this.listEl.scrollTop = this.listEl.scrollHeight;
   }
@@ -407,7 +536,9 @@ export class Game {
 
   // ---------- input ----------
   onDown(e) {
+    if (e.button === 2 || (this.annotMode && (e.button === undefined || e.button === 0))) { this.startMark(e); return; }
     if (e.button !== undefined && e.button > 0) return;
+    if (this.hasMarks()) this.clearMarks();                    // a normal click wipes the drawings
     const sqEl = e.target.closest('.sq');
     if (!sqEl || this.over) return;
     const name = sqEl.dataset.sq;
@@ -532,6 +663,7 @@ export class Game {
     const plies = this.chess.history().length;
     if (this.base && plies > 2) this.clocks[mv.color] += this.inc;
     this.lastTick = performance.now();
+    this.clearMarks(false);
     this.selected = null;
     this.targets.clear();
     if (this.cfg.mode === 'friend' && this.settings.autoFlip && !this.chess.isGameOver()) {
@@ -581,7 +713,7 @@ export class Game {
       if (a === 'rematch') this.hooks.onRematch?.();
       if (a === 'new') this.hooks.onNew?.();
     };
-    this.actionsEl.hidden = true;
+    this.btnsGame.forEach((b) => { b.hidden = true; });
     this.hooks.onFinish?.({
       mode: this.cfg.mode, custom: this.custom, board: this.cfg.variant?.name || null, winner, reason,
       humanColor: this.humanColor, elo: this.cfg.mode === 'bot' ? this.cfg.elo : null,
@@ -615,7 +747,7 @@ export class Game {
     const opp = other(loser);
     const mine = [];
     for (const row of this.chess.board()) for (const p of row) if (p && p.color === opp && !this.geo.isRoyal(p.type)) mine.push(p.type);
-    const cannotMate = mine.length === 0 || (!this.custom && mine.length === 1 && (mine[0] === 'n' || mine[0] === 'b'));
+    const cannotMate = !this.rules.noDraw && (mine.length === 0 || (!this.custom && mine.length === 1 && (mine[0] === 'n' || mine[0] === 'b')));
     if (cannotMate) this.finish(null, 'on time, but the other side can’t checkmate');
     else this.finish(opp, 'on time');
   }

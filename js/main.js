@@ -239,7 +239,7 @@ function play() {
         ${custom ? `
         <div class="custom-card">
           <div class="cc-thumb" id="cc-thumb"></div>
-          <div class="cc-body"><b>${esc(board.name)}</b><small>${esc(curSetup.name)}${edited ? ' · edited position' : ''}</small></div>
+          <div class="cc-body"><b>${esc(board.name)}</b><small>${esc(curSetup.name)}${edited ? ' · edited position' : ''}${setup.kingCapture ? ' · King capture' : ''}${setup.noDraw ? ' · No draws' : ''}</small></div>
           <button type="button" class="btn primary sm" id="cc-open">Change setup…</button>
         </div>
         <p class="hint2">Pick a board and a starting layout, and move any pieces around for this game. Custom games have no castling.${isBot ? ' The bot uses its own engine here (Stockfish only knows normal chess).' : ''}</p>` : ''}
@@ -263,6 +263,10 @@ function play() {
 
   view.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => { setup.mode = b.dataset.mode; saveSetup(); play(); }));
   view.querySelector('#f-mode').addEventListener('change', (e) => { setup.gamemode = e.target.value; saveSetup(); play(); if (setup.gamemode === 'Custom') openCustomDialog(); });
+  view.querySelector('#f-time').addEventListener('click', () => timePopup((t) => {
+    setup.time = t; saveSetup();
+    view.querySelector('#f-time').textContent = timeLabel(t);
+  }));
   if (custom) {
     view.querySelector('#cc-thumb').append(thumbBoard(board, { pieces: edited ? customEdit.pieces : curSetup.pieces }, pieceById, 130));
     view.querySelector('#cc-open').addEventListener('click', openCustomDialog);
@@ -286,8 +290,9 @@ function play() {
 
 function openCustomDialog() {
   const match = customEdit && customEdit.boardId === setup.boardId && customEdit.setupId === setup.setupId;
-  openCustomSetup({ boardId: setup.boardId, setupId: setup.setupId, pieces: match ? customEdit.pieces : null }, (res) => {
+  openCustomSetup({ boardId: setup.boardId, setupId: setup.setupId, pieces: match ? customEdit.pieces : null, rules: { kingCapture: setup.kingCapture, noDraw: setup.noDraw } }, (res) => {
     setup.boardId = res.boardId; setup.setupId = res.setupId;
+    setup.kingCapture = res.rules.kingCapture; setup.noDraw = res.rules.noDraw;
     customEdit = res.edited ? { boardId: res.boardId, setupId: res.setupId, pieces: res.pieces } : null;
     saveSetup();
     play();
@@ -310,6 +315,7 @@ function startGame() {
   if (setup.gamemode === 'Custom') {
     const useEdit = customEdit && customEdit.boardId === setup.boardId && customEdit.setupId === setup.setupId;
     variant = resolveVariant(setup.boardId, setup.setupId, useEdit ? customEdit.pieces : null);
+    if (variant) variant.rules = { kingCapture: !!setup.kingCapture, noDraw: !!setup.noDraw };
     if (!variant) { toast('That board no longer exists. Pick another one.'); return; }
     if (!variant.setup.some((e) => e[3] === 'w') || !variant.setup.some((e) => e[3] === 'b')) {
       toast('This placement needs pieces for both White and Black. Edit the board in Create.');
@@ -436,7 +442,7 @@ function settingsPage() {
         ${gameplay.map(([k, t, d]) => toggle(k, t, d)).join('')}
       </section>
 
-      <p class="foot">Boardly 2026. Made by Claude. v2.2</p>
+      <p class="foot">Boardly 2026. Made by Claude. v2.3</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });

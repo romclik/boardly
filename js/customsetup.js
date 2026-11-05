@@ -6,11 +6,12 @@ import { modal, esc, toast } from './ui.js';
 
 const sortKey = (l) => JSON.stringify([...l].map((e) => e.join()).sort());
 
-export function openCustomSetup({ boardId, setupId, pieces }, onApply) {
+export function openCustomSetup({ boardId, setupId, pieces, rules = {} }, onApply) {
   let board = boardById(boardId) || allBoards()[0];
   let setup = board.setups.find((s) => s.id === setupId) || board.setups[0];
   let list = pieces ? structuredClone(pieces) : structuredClone(setup.pieces);
   const tool = { mode: 'place', color: 'w', piece: allPieces()[0]?.id, sel: null };
+  const rule = { kingCapture: !!rules.kingCapture, noDraw: !!rules.noDraw };
 
   const root = document.createElement('div');
   root.className = 'cs';
@@ -27,6 +28,10 @@ export function openCustomSetup({ boardId, setupId, pieces }, onApply) {
         <div class="palette" id="cs-pal"></div>
       </div>
       <button type="button" class="chip" id="cs-clear">Clear the board</button>
+      <div class="ctl cs-rules"><span class="lbl">Rules</span>
+        <label class="opt"><input type="checkbox" id="cs-kc"><span><b>King capture</b><small>No check, checkmate or stalemate. You may move into check, and whoever captures a king wins. A side with no moves skips its turn.</small></span></label>
+        <label class="opt"><input type="checkbox" id="cs-nd"><span><b>No draws</b><small>Turns off threefold repetition, the 50-move rule, draw by too few pieces and draw offers. Stalemate still ends the game, unless King capture is on.</small></span></label>
+      </div>
       <p class="hint">Anything goes: you can set up positions that could never happen in a normal game. Changes here are not saved to the board. Right-click removes a piece.</p>
     </div>`;
   const $ = (s) => root.querySelector(s);
@@ -37,7 +42,7 @@ export function openCustomSetup({ boardId, setupId, pieces }, onApply) {
       { label: 'Cancel' },
       { label: 'Use this setup', kind: 'primary', keepOpen: true, run: (close) => {
         if (!list.some((e) => e[3] === 'w') || !list.some((e) => e[3] === 'b')) { toast('Both White and Black need at least one piece.'); return; }
-        onApply({ boardId: board.id, setupId: setup.id, pieces: list, edited: sortKey(list) !== sortKey(setup.pieces) });
+        onApply({ boardId: board.id, setupId: setup.id, pieces: list, edited: sortKey(list) !== sortKey(setup.pieces), rules: { ...rule } });
         close();
       } },
     ],
@@ -120,5 +125,9 @@ export function openCustomSetup({ boardId, setupId, pieces }, onApply) {
     tool.piece = b.dataset.id;
     $('#cs-pal').querySelectorAll('.pal').forEach((x) => x.setAttribute('aria-pressed', x === b));
   });
+  $('#cs-kc').checked = rule.kingCapture;
+  $('#cs-nd').checked = rule.noDraw;
+  $('#cs-kc').addEventListener('change', (e) => { rule.kingCapture = e.target.checked; });
+  $('#cs-nd').addEventListener('change', (e) => { rule.noDraw = e.target.checked; });
   fillSelects(); drawPalette(); drawGrid();
 }

@@ -6,6 +6,7 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - **Play with a friend** on one screen, or **with a bot** from 100 to 3200 Elo.
 - **Classic** or **Custom** gamemode, with a time control you set with total time and increment sliders.
 - **Create** your own pieces (draw or upload a picture, set how they move) and boards (any shape up to 16×16, with piece layouts).
+- **Draw arrows and mark squares** on the board like on chess.com: right-click a square to mark it, right-click and drag for an arrow. Hold Ctrl, Alt or Shift for other colors. A left-click clears everything.
 - **Review the game** while you play: step back and forward through the moves with buttons, the arrow keys, or by clicking a move.
 - **Home page** with quick-start tiles, your stats, recent games and a tip of the day.
 - **Themes**: 8 site colors and 12 board styles chosen from dropdowns, plus sound effects with a volume slider.
@@ -16,6 +17,8 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - Custom games use Boardly's own rules engine and bot (Stockfish only knows normal chess). The bot follows the same Elo slider but is weaker than Stockfish at the top end.
 - Custom games have no castling. En passant and promotion work for pieces that have those options turned on.
 - In a Custom game you can edit the starting position for that game, including positions that could never happen in real chess. A side that loses its royal piece loses the game.
+- Custom game rules (in the Custom popup): **King capture** removes check, checkmate and stalemate. You can move into check, whoever captures a king wins, and a side with no moves skips its turn. **No draws** turns off threefold repetition, the 50-move rule, draw by too few pieces and draw offers. Stalemate still ends the game as a draw unless King capture is on.
+- Drawing on the board: right-click a square for a red mark (Ctrl yellow, Alt blue, Shift green). Right-click and drag for an arrow: yellow by default (Ctrl red, Alt blue, Shift green). Knight-shaped drags make L-shaped arrows. Drawings disappear on a left-click, on the next move, or with Escape. On touch screens use the "Draw" button under the move list and drag with a finger.
 - Settings, your stats, your pieces and your boards are stored in your browser. Clearing site data removes them, so use Export for a backup.
 - Third-party code: Stockfish (GPLv3, see `engine/Copying.txt`) and chess.js (BSD-2, see `vendor/chess.js.LICENSE`).
 
@@ -27,6 +30,11 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v2.3
+- Custom games: **King capture** and **No draws** options in the Custom popup.
+- Arrows and highlighted squares on the board (right-click, like chess.com), plus a "Draw" button for touch screens.
+- Fixed: the time control popup did not open on the Play page (a handler was lost in v2.1).
+
 ### v2.2
 - The black piece that Boardly makes automatically now inverts the colors of the white piece instead of darkening it.
 - Move browsing during and after a game: first / previous / next / current buttons, Left / Right / Home / End keys, and clickable moves in the list. The board is read-only while you look at an earlier position.
