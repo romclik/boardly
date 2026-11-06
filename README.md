@@ -30,6 +30,10 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v2.3.2
+- When a game ends, a popup shows the result and game info (players, moves, time control, mode, date).
+- **Save PGN** in that popup lets you choose: copy the PGN to the clipboard or download it as a `.pgn` file. The result panel has a **Game info & PGN** button to open the popup again. Custom boards use Boardly's own piece letters, so other chess programs may not read those PGNs.
+
 ### v2.3.1
 - Removed the "Draw" and "Clear drawings" buttons. Drawing on the board is right-click only.
 - King capture mode: attacked kings get the red outline and the check sound again. Moves are marked "+" when they attack the opponent's king and "-" when they leave your own king attacked. Move hints that would leave your king attacked are red.

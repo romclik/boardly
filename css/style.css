@@ -298,8 +298,9 @@ a { color: inherit; text-decoration: none; }
 }
 .result strong { font-size: 26px; font-weight: 800; }
 .result span { color: var(--tint); font-size: 16px; }
-.result-actions { display: flex; gap: 10px; margin-top: 12px; }
+.result-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .result-actions .btn { flex: 1; padding: 11px 10px; }
+.result-actions .wide-btn { flex-basis: 100%; }
 .mp-actions { display: flex; flex-wrap: wrap; gap: 4px 20px; border-top: 3px solid #fff; margin-top: 14px; padding-top: 14px; width: 100%; }
 .link-btn { border: 0; background: none; font-weight: 700; font-size: 18px; padding: 4px 0; color: #fff; }
 .link-btn:hover { color: var(--purple-hi); }
@@ -766,3 +767,13 @@ details.adv[open] summary { margin-bottom: 4px; }
 /* v2.3.1: moves that would leave your own king attacked are shown in red */
 .sq.dest.bad::after { background: rgba(232, 58, 58, .82); }
 .sq.dest-cap.bad::after { border-color: rgba(232, 58, 58, .92); }
+
+/* ---------- game over popup (v2.3.2) ---------- */
+.ginfo { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 4px 0 0; }
+.ginfo dt { color: var(--muted); font-weight: 600; }
+.ginfo dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.pgn-choice { margin-top: 16px; padding: 14px; border-radius: 14px; background: var(--purple-deep); }
+.pgn-choice p { margin: 0 0 10px; font-weight: 600; color: #fff; }
+.pgn-choice .pgn-note { margin: 10px 0 0; font-weight: 500; font-size: 14px; color: var(--tint); }
+.pgn-btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.pgn-btns .btn { flex: 1 1 auto; white-space: nowrap; }
