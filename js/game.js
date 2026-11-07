@@ -3,7 +3,7 @@ import { CustomChess, FILES as CFILES } from './rules.js';
 import { Engine, fallbackMove } from './engine.js';
 import { parseTime } from './time.js';
 import { modal, toast } from './ui.js';
-import { gameInfoPopup } from './pgn.js';
+import { gameInfoPopup, buildPgn, openAnalysis } from './pgn.js';
 import * as sfx from './sound.js';
 
 const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
@@ -697,12 +697,13 @@ export class Game {
     const title = winner === null ? 'Draw' : winner === 'w' ? 'White won' : 'Black won';
     this.resultEl.hidden = false;
     this.resultEl.innerHTML = `<strong>${title}</strong><span>${reason}</span>
-      <div class="result-actions"><button class="btn primary" data-a="rematch">Rematch</button><button class="btn ghost" data-a="new">New game</button><button class="btn ghost wide-btn" data-a="info">Game info &amp; PGN</button></div>`;
+      <div class="result-actions"><button class="btn primary" data-a="rematch">Rematch</button><button class="btn ghost" data-a="new">New game</button><button class="btn ghost wide-btn" data-a="info">Game info &amp; PGN</button>${this.custom || !this.chess.history().length ? '' : '<button class="btn ghost wide-btn" data-a="analyze">Analyze game</button>'}</div>`;
     this.resultEl.onclick = (e) => {
       const a = e.target.closest('button')?.dataset.a;
       if (a === 'rematch') this.hooks.onRematch?.();
       if (a === 'new') this.hooks.onNew?.();
       if (a === 'info') this.showInfo();
+      if (a === 'analyze') openAnalysis(buildPgn(this.endInfo()));
     };
     if (this.chess.history().length > 0) {
       this.infoTimer = setTimeout(() => { if (this.root.isConnected) this.showInfo(); }, 700);
@@ -712,21 +713,26 @@ export class Game {
       mode: this.cfg.mode, custom: this.custom, board: this.cfg.variant?.name || null, winner, reason,
       humanColor: this.humanColor, elo: this.cfg.mode === 'bot' ? this.cfg.elo : null,
       plies: this.chess.history().length, time: this.cfg.time, date: Date.now(),
+      pgn: this.custom || !this.chess.history().length ? null : buildPgn(this.endInfo()),
     });
     this.selected = null;
     this.targets.clear();
     this.render();
   }
 
-  showInfo() {
-    this.infoPopup?.close();
-    this.infoPopup = gameInfoPopup({
+  endInfo() {
+    return {
       moves: this.chess.history({ verbose: true }),
       winner: this.result.winner, reason: this.result.reason,
       mode: this.cfg.mode, custom: this.custom, boardName: this.cfg.variant?.name || null,
       rules: this.rules, elo: this.cfg.elo, humanColor: this.humanColor,
       name: this.settings.name, time: this.cfg.time, date: this.endDate || Date.now(),
-    }, { onRematch: this.hooks.onRematch, onNew: this.hooks.onNew });
+    };
+  }
+
+  showInfo() {
+    this.infoPopup?.close();
+    this.infoPopup = gameInfoPopup(this.endInfo(), { onRematch: this.hooks.onRematch, onNew: this.hooks.onNew });
   }
 
   // ---------- clocks ----------

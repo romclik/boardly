@@ -76,6 +76,12 @@ export function buildPgn(info) {
   return tags.join('\n') + '\n\n' + note + text + '\n';
 }
 
+// Hand a finished game to the Analyze page.
+export function openAnalysis(pgn) {
+  try { sessionStorage.setItem('boardly:analyze-pending', pgn); } catch { /* ignore */ }
+  location.hash = '#/analyze';
+}
+
 export function pgnFileName(date = Date.now()) {
   const d = new Date(date);
   return `boardly_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.pgn`;
@@ -133,6 +139,7 @@ export function gameInfoPopup(info, hooks = {}) {
     content: body,
     actions: [
       { label: 'Save PGN', kind: 'primary', keepOpen: true, run: () => { choice.hidden = !choice.hidden; } },
+      ...(!info.custom && info.moves.length ? [{ label: 'Analyze', run: () => openAnalysis(buildPgn(info)) }] : []),
       ...(hooks.onRematch ? [{ label: 'Rematch', run: hooks.onRematch }] : []),
       ...(hooks.onNew ? [{ label: 'New game', run: hooks.onNew }] : []),
       { label: 'Close' },

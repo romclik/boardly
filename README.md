@@ -7,6 +7,8 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - **Classic** or **Custom** gamemode, with a time control you set with total time and increment sliders.
 - **Create** your own pieces (draw or upload a picture, set how they move) and boards (any shape up to 16×16, with piece layouts).
 - **Draw arrows and mark squares** on the board like on chess.com: right-click a square to mark it, right-click and drag for an arrow. Hold Ctrl, Alt or Shift for other colors. A left-click clears everything.
+- **Analyze games**: Stockfish rates every move (Brilliant to Blunder), with an eval bar, graph and accuracy. Paste a PGN or pick one of your games.
+- **Save PGN**: when a game ends, copy it or download it as a `.pgn` file.
 - **Review the game** while you play: step back and forward through the moves with buttons, the arrow keys, or by clicking a move.
 - **Home page** with quick-start tiles, your stats, recent games and a tip of the day.
 - **Themes**: 8 site colors and 12 board styles chosen from dropdowns, plus sound effects with a volume slider.
@@ -30,6 +32,13 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v3.0
+- New **Analyze** page. Paste a PGN, open a `.pgn` file or pick one of your Boardly games, and Stockfish rates every move: Brilliant, Critical, Best, Excellent, Okay, Inaccuracy, Mistake, Blunder and Theory (opening book from the Lichess opening list, CC0).
+- Eval bar, eval graph, accuracy for both players, a count of every rating, best-move arrows and move browsing with arrow keys.
+- Effort slider: More speed, Auto or More effort. Advanced settings let you set depth, time per position, number of lines, memory and the Brilliant/Critical/Theory options.
+- Games you finish now keep their moves, so they can be analyzed later. Finished classic games have an **Analyze** button.
+- Only classic chess can be analyzed (custom boards and pieces are not supported yet).
+
 ### v2.3.2
 - When a game ends, a popup shows the result and game info (players, moves, time control, mode, date).
 - **Save PGN** in that popup lets you choose: copy the PGN to the clipboard or download it as a `.pgn` file. The result panel has a **Game info & PGN** button to open the popup again. Custom boards use Boardly's own piece letters, so other chess programs may not read those PGNs.
