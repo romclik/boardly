@@ -5,6 +5,7 @@ import { parseTime } from './time.js';
 import { modal, toast } from './ui.js';
 import { gameInfoPopup, buildPgn, openAnalysis } from './pgn.js';
 import * as sfx from './sound.js';
+import { kingBadge } from './boardart.js';
 
 const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
@@ -412,6 +413,7 @@ export class Game {
       el.classList.toggle('dest-cap', !!(s.hints && t && t.cap));
       el.classList.toggle('bad', !!(s.hints && t && t.unsafe));
       el.querySelector('img.pc')?.remove();
+      el.querySelector('.kb')?.remove();
       const p = at[name];
       if (p) {
         const img = new Image();
@@ -421,6 +423,19 @@ export class Game {
         img.draggable = false;
         el.prepend(img);
       }
+    }
+    this.renderKingBadges(c);
+  }
+
+  // When the game is over: green crown on the winner's king, red # on the loser's king.
+  renderKingBadges(c) {
+    const w = this.result?.winner;
+    if (w === undefined || w === null || this.curPly !== this.plies) return;
+    for (const color of ['w', 'b']) {
+      const squares = [];
+      if (this.custom) { for (const i of c.royals?.(color) || []) squares.push(c.sqName(i)); }
+      else for (const row of c.board()) for (const p of row) if (p && p.type === 'k' && p.color === color) squares.push(p.square);
+      for (const sq of squares) this.sq[sq]?.insertAdjacentHTML('beforeend', kingBadge(color === w ? 'win' : 'loss').replace('class="rb kb', 'class="rb sqbadge kb'));
     }
   }
 

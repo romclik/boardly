@@ -32,6 +32,14 @@ Chess in your browser. Play a friend on one screen, or play a bot, on the classi
 - In **Play → Gamemode → Custom** you pick a board and a layout, and can move, add or remove pieces for that game only.
 
 ## Changelog
+### v3.1
+- Analyze: pieces now glide when you step through a game.
+- Analyze: knight arrows are L-shaped, like on chess.com.
+- Analyze: you can move pieces (click or drag) to try your own moves. Stockfish rates each one, and the eval bar follows. Use "Back to the game" to return.
+- Rating badges on the board are bigger.
+- Finished games show a green crown on the winner's king and a red # on the loser's king, in Play and in Analyze.
+- All rating icons are drawn as icons now (no emoji).
+
 ### v3.0
 - New **Analyze** page. Paste a PGN, open a `.pgn` file or pick one of your Boardly games, and Stockfish rates every move: Brilliant, Critical, Best, Excellent, Okay, Inaccuracy, Mistake, Blunder and Theory (opening book from the Lichess opening list, CC0).
 - Eval bar, eval graph, accuracy for both players, a count of every rating, best-move arrows and move browsing with arrow keys.

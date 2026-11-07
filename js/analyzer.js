@@ -10,15 +10,15 @@ export const EFFORTS = [
 export const DEFAULT_ADVANCED = { depth: 16, ms: 800, lines: 2, hash: 32, book: true, special: true };
 
 export const CLASSES = [
-  { id: 'brilliant', label: 'Brilliant', glyph: '!!', color: '#26c2a3' },
-  { id: 'critical', label: 'Critical', glyph: '!', color: '#6b9bc4' },
-  { id: 'best', label: 'Best', glyph: '★', color: '#96bc4b' },
-  { id: 'excellent', label: 'Excellent', glyph: '👍', color: '#96bc4b' },
-  { id: 'okay', label: 'Okay', glyph: '✓', color: '#8a9a78' },
-  { id: 'inaccuracy', label: 'Inaccuracy', glyph: '?!', color: '#f7c631' },
-  { id: 'mistake', label: 'Mistake', glyph: '?', color: '#f0902e' },
-  { id: 'blunder', label: 'Blunder', glyph: '??', color: '#e03c3a' },
-  { id: 'theory', label: 'Theory', glyph: '📖', color: '#b08d62' },
+  { id: 'brilliant', label: 'Brilliant', color: '#26c2a3' },
+  { id: 'critical', label: 'Critical', color: '#6b9bc4' },
+  { id: 'best', label: 'Best', color: '#96bc4b' },
+  { id: 'excellent', label: 'Excellent', color: '#96bc4b' },
+  { id: 'okay', label: 'Okay', color: '#8a9a78' },
+  { id: 'inaccuracy', label: 'Inaccuracy', color: '#f7c631' },
+  { id: 'mistake', label: 'Mistake', color: '#f0902e' },
+  { id: 'blunder', label: 'Blunder', color: '#e03c3a' },
+  { id: 'theory', label: 'Theory', color: '#b08d62' },
 ];
 export const CLASS_BY_ID = Object.fromEntries(CLASSES.map((c) => [c.id, c]));
 
@@ -137,6 +137,18 @@ export const fensOf = (startFen, moves) => {
   return out;
 };
 
+// ---------- one position ----------
+// White-view evaluation { lines: [{ cp | mate, pv }] } of a position. Finished games need no engine.
+export async function evalFen(eng, fen, o) {
+  const chess = new Chess(fen);
+  const white = chess.turn() === 'w';
+  if (chess.isCheckmate()) return { lines: [{ mate: 0, winner: white ? 0 : 100, pv: [] }] };
+  if (chess.isDraw() || chess.isStalemate()) return { lines: [{ cp: 0, pv: [] }] };
+  const raw = await eng.analyse(fen, { depth: o.depth, ms: o.ms, lines: Math.min(o.lines, chess.moves().length) });
+  const s = white ? 1 : -1;                         // turn the score to White's view
+  return { lines: raw.map((r) => { const l = { pv: r.pv }; if (r.mate !== undefined) l.mate = r.mate * s; else l.cp = r.cp * s; return l; }) };
+}
+
 // ---------- the main loop ----------
 // onProgress(done, total); shouldStop() -> bool. Resolves with { evals } (White view) or null when stopped.
 export async function runAnalysis(game, opts, onProgress, shouldStop) {
@@ -150,22 +162,8 @@ export async function runAnalysis(game, opts, onProgress, shouldStop) {
     eng.newGame();
     for (let i = 0; i < total; i++) {
       if (shouldStop()) return null;
-      const chess = new Chess(fens[i]);
-      const white = chess.turn() === 'w';
-      if (chess.isCheckmate()) { evals.push({ lines: [{ mate: 0, winner: white ? 0 : 100, pv: [] }] }); }
-      else if (chess.isDraw() || chess.isStalemate()) { evals.push({ lines: [{ cp: 0, pv: [] }] }); }
-      else {
-        const raw = await eng.analyse(fens[i], { depth: opts.depth, ms, lines: Math.min(opts.lines, chess.moves().length) });
-        if (shouldStop()) return null;
-        evals.push({
-          lines: raw.map((r) => {
-            const s = white ? 1 : -1;               // turn the score to White's view
-            const o = { pv: r.pv };
-            if (r.mate !== undefined) o.mate = r.mate * s; else o.cp = r.cp * s;
-            return o;
-          }),
-        });
-      }
+      evals.push(await evalFen(eng, fens[i], { depth: opts.depth, ms, lines: opts.lines }, shouldStop));
+      if (shouldStop()) return null;
       onProgress(i + 1, total);
     }
   } finally { eng.terminate(); }
@@ -173,43 +171,47 @@ export async function runAnalysis(game, opts, onProgress, shouldStop) {
 }
 
 // ---------- rating the moves ----------
+// Rates one move. evBefore / evAfter are White-view evaluations of the positions before and after it.
+export function classifyMove({ fenBefore, move: m, evBefore, evAfter, theory, opts }) {
+  const me = m.color;
+  const mine = (x) => (me === 'w' ? x : 100 - x);
+  const before = mine(winPct(evBefore.lines[0])), after = mine(winPct(evAfter.lines[0]));
+  const loss = Math.max(0, before - after);
+  const top = evBefore.lines[0];
+  const isBest = top?.pv?.[0] === m.uci || loss <= 0.3;
+  let cls;
+  if (theory) cls = 'theory';
+  else if (isBest) {
+    cls = 'best';
+    if (opts.special) {
+      // Critical: the only move that holds the position (the next best line is much worse)
+      const second = evBefore.lines[1];
+      if (second && before - mine(winPct(second)) >= 15 && before > 12 && before < 90 && top.pv[0] === m.uci) cls = 'critical';
+      // Brilliant: a real sacrifice that still works
+      if ((before < 97 || top.mate !== undefined) && after >= 50 && isSacrifice(fenBefore, m, evAfter.lines[0]?.pv || [])) cls = 'brilliant';
+    }
+  } else if (loss <= 2) cls = 'excellent';
+  else if (loss <= 5) cls = 'okay';
+  else if (loss <= 10) cls = 'inaccuracy';
+  else if (loss <= 20) cls = 'mistake';
+  else cls = 'blunder';
+  return { cls, loss: Math.round(loss * 10) / 10, acc: moveAccuracy(loss) };
+}
+
 export function rate(game, evals, opts, book = {}) {
   const fens = fensOf(game.startFen, game.moves);
-  const wp = (i) => winPct(evals[i].lines[0]);
   const res = [];
   const accSum = { w: 0, b: 0 }, accN = { w: 0, b: 0 };
   const names = [];
   let lastName = null;
   for (let i = 0; i < game.moves.length; i++) {
     const m = game.moves[i];
-    const me = m.color;
-    const mine = (x) => (me === 'w' ? x : 100 - x);
-    const before = mine(wp(i)), after = mine(wp(i + 1));
-    const loss = Math.max(0, before - after);
-    const top = evals[i].lines[0];
-    const isBest = top?.pv?.[0] === m.uci || loss <= 0.3;
     const posName = opts.book ? book[fen4(fens[i + 1])] : null;
     if (posName) lastName = posName;
     names.push(lastName);
-    let cls;
-    if (posName) cls = 'theory';
-    else if (isBest) {
-      cls = 'best';
-      if (opts.special) {
-        // Critical: the only move that holds the position (the next best line is much worse)
-        const second = evals[i].lines[1];
-        if (second && mine(wp(i)) - mine(winPct(second)) >= 15 && before > 12 && before < 90 && top.pv[0] === m.uci) cls = 'critical';
-        // Brilliant: a real sacrifice that still works
-        if ((before < 97 || top.mate !== undefined) && after >= 50 && isSacrifice(fens[i], m, evals[i + 1].lines[0]?.pv || [])) cls = 'brilliant';
-      }
-    } else if (loss <= 2) cls = 'excellent';
-    else if (loss <= 5) cls = 'okay';
-    else if (loss <= 10) cls = 'inaccuracy';
-    else if (loss <= 20) cls = 'mistake';
-    else cls = 'blunder';
-    const acc = moveAccuracy(loss);
-    accSum[me] += acc; accN[me]++;
-    res.push({ cls, loss: Math.round(loss * 10) / 10 });
+    const c = classifyMove({ fenBefore: fens[i], move: m, evBefore: evals[i], evAfter: evals[i + 1], theory: !!posName, opts });
+    accSum[m.color] += c.acc; accN[m.color]++;
+    res.push({ cls: c.cls, loss: c.loss });
   }
   return {
     cls: res,
@@ -217,6 +219,8 @@ export function rate(game, evals, opts, book = {}) {
     acc: { w: accN.w ? accSum.w / accN.w : null, b: accN.b ? accSum.b / accN.b : null },
   };
 }
+
+export const bookName = (book, fen) => book[fen4(fen)] || null;
 
 // Material the mover has given up for good: play the engine's follow-up line and compare.
 function isSacrifice(fenBefore, m, pv) {

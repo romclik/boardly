@@ -830,7 +830,6 @@ details.adv[open] summary { margin-bottom: 4px; }
 .an-boardbox { position: relative; flex: 1; aspect-ratio: 1; min-width: 0; }
 .an-board { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); border-radius: 10px; overflow: hidden; user-select: none; box-shadow: 0 24px 50px -22px rgba(0,0,0,.8); }
 .an-arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-.an-badge { position: absolute; z-index: 6; top: -1%; right: -1%; min-width: 26%; height: 26%; display: grid; place-items: center; border-radius: 99px; font-size: clamp(9px, 1.6vw, 15px); font-weight: 800; color: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); line-height: 1; transform: scale(.85); transform-origin: top right; }
 .an-player { display: flex; align-items: center; gap: 10px; padding: 2px 4px 2px 40px; font-size: 18px; }
 .an-player small { color: var(--muted); font-weight: 600; margin-left: auto; padding-right: 4px; }
 .an-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #777; }
@@ -844,8 +843,6 @@ details.adv[open] summary { margin-bottom: 4px; }
 .an-line { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 19px; flex-wrap: wrap; }
 .an-sub2 { margin: 6px 0 0; color: #c9c9d3; font-size: 15px; }
 .an-ev { color: var(--muted); margin-left: 6px; }
-.an-ic { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 800; color: #fff; flex: none; line-height: 1; }
-.an-ic.sm { width: 18px; height: 18px; font-size: 9px; }
 .an-acc { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; text-align: center; margin-bottom: 12px; }
 .an-acc small { display: block; color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-acc b { font-size: 26px; display: block; background: #1d1d20; border-radius: 10px; padding: 4px 0; }
@@ -873,3 +870,30 @@ details.adv[open] summary { margin-bottom: 4px; }
   .an-evaltxt { font-size: 8px; letter-spacing: -.5px; }
 }
 .an-root .page-sub { font-size: 18px; font-weight: 500; color: var(--muted); margin: 4px 0 0; }
+
+/* ---------- icons, king results, trying moves (v3.1) ---------- */
+.rb { --rb: 26px; display: inline-grid; place-items: center; flex: none; width: var(--rb); height: var(--rb); border-radius: 50%; background: var(--c, #666); box-shadow: 0 1px 3px rgba(0,0,0,.45); }
+.rb svg { width: 74%; height: 74%; }
+.sqbadge { position: absolute; z-index: 6; top: 3%; right: 3%; width: 44%; height: 44%; --rb: 44%; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,.55); }
+.sqbadge.left { right: auto; left: 3%; }
+.sqbadge svg { width: 78%; height: 78%; }
+.an-line { flex-wrap: nowrap; }
+.an-line > span:not(.rb):not(.an-spin) { min-width: 0; }
+.an-line .rb { margin-right: 2px; }
+.an-try { color: var(--muted); font-weight: 600; font-size: 15px; margin-right: 2px; }
+.an-board { touch-action: none; }
+.an-board .sq { cursor: pointer; }
+.an-ghost { position: fixed; z-index: 1000; pointer-events: none; padding: 1%; filter: drop-shadow(0 6px 8px rgba(0,0,0,.5)); }
+.an-tip { margin: 2px 0 0 36px; color: var(--muted); font-size: 14px; }
+.an-var { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 36px; }
+.an-varlabel { color: var(--muted); font-weight: 700; font-size: 14px; margin-right: 4px; }
+.an-chip { display: inline-flex; align-items: center; gap: 6px; border: 0; background: #34343b; border-radius: 99px; padding: 4px 12px 4px 6px; font-weight: 700; font-size: 15px; }
+.an-chip.cur { background: var(--purple); }
+.an-spin { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #555; border-top-color: var(--purple-hi); animation: an-rot .8s linear infinite; vertical-align: -3px; }
+.an-spin.sm { width: 16px; height: 16px; border-width: 2px; }
+@keyframes an-rot { to { transform: rotate(360deg); } }
+.an-promo { display: flex; gap: 10px; justify-content: center; }
+.an-promo button { background: #3a3a41; border: 0; border-radius: 14px; padding: 8px; }
+.an-promo button:hover { background: var(--purple); }
+.an-promo img { width: 62px; height: 62px; display: block; }
+@media (max-width: 900px) { .an-tip, .an-var { margin-left: 0; padding-left: 0; } }

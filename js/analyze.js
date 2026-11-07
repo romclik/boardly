@@ -1,8 +1,9 @@
 // The Analyze page (v3.0): pick a game, choose how hard Stockfish thinks, then review every move.
 import { Chess } from '../vendor/chess.js';
-import { esc, toast } from './ui.js';
+import { esc, toast, modal } from './ui.js';
+import { ratingBadge, kingBadge, arrowSvg } from './boardart.js';
 import {
-  EFFORTS, DEFAULT_ADVANCED, CLASSES, CLASS_BY_ID, readPgn, runAnalysis, rate, loadBook, evalText, winPct, sanFor, fensOf,
+  EFFORTS, DEFAULT_ADVANCED, CLASSES, CLASS_BY_ID, AnalysisEngine, readPgn, runAnalysis, rate, classifyMove, evalFen, bookName, loadBook, evalText, winPct, sanFor, fensOf,
 } from './analyzer.js';
 
 export const PENDING_KEY = 'boardly:analyze-pending';
@@ -10,7 +11,7 @@ const PHRASE = { brilliant: 'is a brilliant move', critical: 'is a critical move
 const PNG = (c, t) => `pieces/${c}${t.toUpperCase()}.svg`;
 const hashStr = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h >>> 0); };
 
-export function analyzePage(view, { store, history }) {
+export function analyzePage(view, { store, history, settings = {} }) {
   const saved = store.get('analyze-cfg', {});
   const cfg = { effort: 1, custom: false, adv: { ...DEFAULT_ADVANCED }, ...saved };
   cfg.adv = { ...DEFAULT_ADVANCED, ...cfg.adv };
@@ -18,8 +19,10 @@ export function analyzePage(view, { store, history }) {
   let root = null;
   let stop = false;
   let keyHandler = null;
+  let killTry = () => {};
   const alive = () => root && root.isConnected;
   const mount = (html, cls) => {
+    killTry(); killTry = () => {};
     if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
     view.innerHTML = `<div class="an-root ${cls || ''}">${html}</div>`;
     root = view.firstElementChild;
@@ -174,12 +177,21 @@ export function analyzePage(view, { store, history }) {
     const n = game.moves.length;
     const h = game.headers;
     const white = h.White || 'White', black = h.Black || 'Black';
+    const files = 'abcdefgh';
+    const tryOpts = { depth: opts.depth, ms: opts.ms > 0 ? opts.ms : 1500, lines: Math.max(2, opts.lines) };
     let ply = n;                   // 0 = start position, k = after move k
     let flip = false;
+    let vars = [];                 // moves the player tried from position `ply`: { fen, move, ev, cls, name }
+    let vi = 0;                    // 0 = the real game, k = after vars[k - 1]
+    let sel = null;                // selected square while trying a move
+    let targets = new Map();
+    let drag = null;
+    let sqEls = {};
     const wpOf = (i) => winPct(evals[i].lines[0]);
     const counts = { w: {}, b: {} };
     CLASSES.forEach((c) => { counts.w[c.id] = 0; counts.b[c.id] = 0; });
     game.moves.forEach((m, i) => { counts[m.color][r.cls[i].cls]++; });
+    const badge = (id, size, cls = '') => ratingBadge(id, CLASS_BY_ID[id].color, { size, cls, title: CLASS_BY_ID[id].label });
 
     mount(`
       <div class="page-head an-head">
@@ -201,66 +213,129 @@ export function analyzePage(view, { store, history }) {
             <button type="button" class="btn ghost" data-nav="end" aria-label="Last position">⏭</button>
             <button type="button" class="btn ghost" data-nav="flip">Flip board</button>
           </div>
+          <div class="an-var" id="an-var" hidden></div>
+          <p class="an-tip">Tip: move a piece on the board to try your own move and see how it would be rated.</p>
         </div>
         <div class="an-right">
           <section class="card an-msg" id="an-msg"></section>
           <section class="card an-sum">
             <div class="an-acc"><div><small>${esc(white)}</small><b>${r.acc.w === null ? '–' : r.acc.w.toFixed(1)}</b></div><span>Accuracy</span><div><small>${esc(black)}</small><b>${r.acc.b === null ? '–' : r.acc.b.toFixed(1)}</b></div></div>
-            <table class="an-table">${CLASSES.filter((c) => opts.special || (c.id !== 'brilliant' && c.id !== 'critical')).filter((c) => opts.book || c.id !== 'theory').map((c) => `<tr><td style="color:${c.color}">${c.label}</td><td class="n" style="color:${counts.w[c.id] ? c.color : ''}">${counts.w[c.id]}</td><td class="n" style="color:${counts.b[c.id] ? c.color : ''}">${counts.b[c.id]}</td><td><i class="an-ic" style="background:${c.color}">${c.glyph}</i></td></tr>`).join('')}</table>
+            <table class="an-table">${CLASSES.filter((c) => opts.special || (c.id !== 'brilliant' && c.id !== 'critical')).filter((c) => opts.book || c.id !== 'theory').map((c) => `<tr><td style="color:${c.color}">${c.label}</td><td class="n" style="color:${counts.w[c.id] ? c.color : ''}">${counts.w[c.id]}</td><td class="n" style="color:${counts.b[c.id] ? c.color : ''}">${counts.b[c.id]}</td><td>${badge(c.id, '26px')}</td></tr>`).join('')}</table>
           </section>
           <section class="card an-graphcard"><svg id="an-graph" viewBox="0 0 300 70" preserveAspectRatio="none"></svg></section>
           <section class="card an-moves"><div class="an-open" id="an-open"></div><div class="an-list" id="an-list"></div></section>
         </div>
       </div>`, 'an-m-review');
-    const $ = (s) => root.querySelector(s);
+    const myRoot = root;
+    const $ = (s) => myRoot.querySelector(s);
 
-    // moves list
+    // ----- helper engine for "try a move" -----
+    let eng = null, chain = Promise.resolve();
+    const getEng = () => (eng ||= (async () => { const e = new AnalysisEngine(); await e.load(opts.hash); return e; })());
+    const queue = (fn) => { const p = chain.then(fn); chain = p.catch(() => {}); return p; };
+    killTry = () => { clearInterval(gc); eng?.then((e) => e.terminate()).catch(() => {}); eng = null; };
+    const gc = setInterval(() => { if (!myRoot.isConnected) killTry(); }, 2000);
+
+    // ----- what is on the board right now -----
+    const entry = () => {
+      if (vi) {
+        const v = vars[vi - 1];
+        const prev = vi === 1 ? { fen: fens[ply], ev: evals[ply] } : vars[vi - 2];
+        return { fen: v.fen, ev: v.ev || prev.ev, move: v.move, cls: v.cls, prevFen: prev.fen, prevEv: prev.ev, name: v.name, mine: true, pending: !v.ev, err: v.err };
+      }
+      if (ply === 0) return { fen: fens[0], ev: evals[0], move: null };
+      return { fen: fens[ply], ev: evals[ply], move: game.moves[ply - 1], cls: r.cls[ply - 1].cls, prevFen: fens[ply - 1], prevEv: evals[ply - 1], name: r.names[ply - 1] };
+    };
+    const outcome = (e) => {
+      const c = new Chess(e.fen);
+      if (c.isCheckmate()) return c.turn();
+      if (!e.mine && ply === n) { if (h.Result === '1-0') return 'b'; if (h.Result === '0-1') return 'w'; }
+      return null;
+    };
+    const pairsOf = (m, reverse) => {
+      const pairs = [[m.from, m.to]];
+      if (m.san.startsWith('O-O')) {
+        const rank = m.color === 'w' ? '1' : '8', king = !m.san.startsWith('O-O-O');
+        pairs.push([(king ? 'h' : 'a') + rank, (king ? 'f' : 'd') + rank]);
+      }
+      return reverse ? pairs.map(([a, b]) => [b, a]) : pairs;
+    };
+    const legalTargets = (fen, from) => {
+      const t = new Map();
+      for (const m of new Chess(fen).moves({ square: from, verbose: true })) t.set(m.to, { cap: !!m.captured || m.flags.includes('e'), promo: !!m.promotion });
+      return t;
+    };
+
+    // moves list and graph (built once)
     const rows = [];
     for (let i = 0; i < n; i += 2) {
-      const cell = (k) => (k < n ? `<button type="button" class="an-mv" data-ply="${k + 1}"><i class="an-ic sm" style="background:${CLASS_BY_ID[r.cls[k].cls].color}">${CLASS_BY_ID[r.cls[k].cls].glyph}</i>${esc(game.moves[k].san)}</button>` : '<span></span>');
+      const cell = (k) => (k < n ? `<button type="button" class="an-mv" data-ply="${k + 1}">${badge(r.cls[k].cls, '18px')}${esc(game.moves[k].san)}</button>` : '<span></span>');
       rows.push(`<div class="an-pair"><span class="an-num">${i / 2 + 1}</span>${cell(i)}${cell(i + 1)}</div>`);
     }
     $('#an-list').innerHTML = rows.join('');
-
-    // graph
     const pts = evals.map((_, i) => [(i / Math.max(1, n)) * 300, 70 - (wpOf(i) / 100) * 70]);
     $('#an-graph').innerHTML = `<rect width="300" height="70" fill="#3a3a41"/><path d="M0 70 L${pts.map((p) => p.join(' ')).join(' L')} L300 70Z" fill="#e8e8f0"/><line x1="0" y1="35" x2="300" y2="35" stroke="#8d8d98" stroke-width=".5" vector-effect="non-scaling-stroke"/><line id="an-gline" x1="0" x2="0" y1="0" y2="70" stroke="#8a5cff" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
-    $('#an-graph').addEventListener('pointerdown', (e) => {
-      const b = e.currentTarget.getBoundingClientRect();
-      go(Math.round(((e.clientX - b.left) / b.width) * n));
-    });
+    $('#an-graph').addEventListener('pointerdown', (e) => { const b = e.currentTarget.getBoundingClientRect(); go(Math.round(((e.clientX - b.left) / b.width) * n)); });
 
-    function render() {
-      const chess = new Chess(fens[ply]);
+    // pieces glide to their new squares
+    function animate(pairs) {
+      if (!settings.animate || !pairs) return;
+      for (const [f, t] of pairs) {
+        const to = sqEls[t], from = sqEls[f];
+        const img = to?.querySelector('img.pc');
+        if (!img || !from) continue;
+        const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+        img.style.transition = 'none';
+        img.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+        img.style.zIndex = 7;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          img.style.transition = 'transform .18s cubic-bezier(.2,.7,.2,1)';
+          img.style.transform = '';
+          setTimeout(() => { img.style.zIndex = ''; }, 230);
+        }));
+      }
+    }
+
+    function render(pairs = null) {
+      const e = entry();
+      const chess = new Chess(e.fen);
       const grid = $('#an-board');
       grid.textContent = '';
-      const last = ply > 0 ? game.moves[ply - 1] : null;
+      sqEls = {};
+      const last = e.move;
+      const lose = outcome(e);
       const rowsB = chess.board();
-      const files = 'abcdefgh';
       for (let rr = 0; rr < 8; rr++) {
         for (let cc = 0; cc < 8; cc++) {
           const x = flip ? 7 - cc : cc, y = flip ? 7 - rr : rr;           // y = 0 is rank 8
           const name = files[x] + (8 - y);
           const el = document.createElement('div');
           el.className = 'sq ' + ((x + (7 - y)) % 2 === 0 ? 'dark' : 'light');
+          el.dataset.sq = name;
           if (last && (name === last.from || name === last.to)) el.classList.add('last');
+          if (sel === name) el.classList.add('sel');
+          const t = targets.get(name);
+          if (t) el.classList.add(t.cap ? 'dest-cap' : 'dest');
           if (cc === 0) el.insertAdjacentHTML('beforeend', `<i class="coord rank">${8 - y}</i>`);
           if (rr === 7) el.insertAdjacentHTML('beforeend', `<i class="coord file">${files[x]}</i>`);
           const p = rowsB[y][x];
-          if (p) { const img = new Image(); img.className = 'pc'; img.src = PNG(p.color, p.type); img.alt = ''; img.draggable = false; el.append(img); }
-          if (last && name === last.to) {
-            const c = CLASS_BY_ID[r.cls[ply - 1].cls];
-            el.insertAdjacentHTML('beforeend', `<b class="an-badge" style="background:${c.color}" title="${c.label}">${c.glyph}</b>`);
+          if (p) {
+            const img = new Image(); img.className = 'pc'; img.src = PNG(p.color, p.type); img.alt = ''; img.draggable = false;
+            if (drag?.moved && drag.from === name) img.style.opacity = '.35';
+            el.append(img);
           }
+          let rated = false;
+          if (last && name === last.to && e.cls) { el.insertAdjacentHTML('beforeend', badge(e.cls, '', 'sqbadge')); rated = true; }
+          if (p && p.type === 'k' && lose) el.insertAdjacentHTML('beforeend', kingBadge(p.color === lose ? 'loss' : 'win').replace('class="rb kb', `class="rb sqbadge${rated ? ' left' : ''} kb`));
+          sqEls[name] = el;
           grid.append(el);
         }
       }
       // eval bar
-      const wp = wpOf(ply);
+      const wp = winPct(e.ev.lines[0]);
       $('#an-evalfill').style.height = `${wp}%`;
       $('#an-evalbar').classList.toggle('flipped', flip);
-      const txt = evalText(evals[ply].lines[0]);
-      $('#an-evaltxt').textContent = txt;
+      $('#an-evaltxt').textContent = evalText(e.ev.lines[0]);
       $('#an-evaltxt').className = 'an-evaltxt ' + (wp >= 50 ? 'on-white' : 'on-black');
       // players
       const side = (c) => `<span class="an-dot ${c}"></span><b>${esc(c === 'w' ? white : black)}</b><small>${(r.acc[c] ?? null) === null ? '' : r.acc[c].toFixed(1) + '%'}</small>`;
@@ -269,66 +344,168 @@ export function analyzePage(view, { store, history }) {
       // best-move arrow (only when the played move was not already good)
       const ar = $('#an-arrows');
       ar.innerHTML = '';
-      if (ply > 0) {
-        const cl = r.cls[ply - 1].cls;
-        const bestUci = evals[ply - 1].lines[0]?.pv?.[0];
-        if (bestUci && !['best', 'brilliant', 'critical', 'theory'].includes(cl) && bestUci !== game.moves[ply - 1].uci) {
-          const pos = (sq) => [flip ? 7 - files.indexOf(sq[0]) : files.indexOf(sq[0]), flip ? +sq[1] - 1 : 8 - +sq[1]];
-          const [x1, y1] = pos(bestUci.slice(0, 2)), [x2, y2] = pos(bestUci.slice(2, 4));
-          const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
-          const ux = dx / len, uy = dy / len;
-          ar.innerHTML = `<g opacity=".8" fill="#7ad04f" stroke="#7ad04f"><line x1="${x1 + .5}" y1="${y1 + .5}" x2="${x2 + .5 - ux * .35}" y2="${y2 + .5 - uy * .35}" stroke-width=".16" stroke-linecap="round"/><polygon stroke="none" points="${x2 + .5},${y2 + .5} ${x2 + .5 - ux * .42 - uy * .24},${y2 + .5 - uy * .42 + ux * .24} ${x2 + .5 - ux * .42 + uy * .24},${y2 + .5 - uy * .42 - ux * .24}"/></g>`;
-        }
+      const bestUci = e.prevEv?.lines[0]?.pv?.[0];
+      if (e.move && e.cls && bestUci && !['best', 'brilliant', 'critical', 'theory'].includes(e.cls) && bestUci !== e.move.uci) {
+        const pos = (sq) => ({ x: (flip ? 7 - files.indexOf(sq[0]) : files.indexOf(sq[0])) + 0.5, y: (flip ? +sq[1] - 1 : 8 - +sq[1]) + 0.5 });
+        const knight = new Chess(e.prevFen).get(bestUci.slice(0, 2))?.type === 'n';
+        ar.innerHTML = arrowSvg(pos(bestUci.slice(0, 2)), pos(bestUci.slice(2, 4)), { color: '#7ad04f', opacity: 0.85, knight });
       }
       // message
       const msg = $('#an-msg');
-      if (ply === 0) msg.innerHTML = '<p class="an-line">Start position</p><p class="an-sub2">Use ◀ ▶ or your arrow keys to step through the game.</p>';
+      if (e.pending) msg.innerHTML = `<p class="an-line"><span class="an-spin"></span> Rating <b>${esc(e.move.san)}</b>…</p><p class="an-sub2">Stockfish is checking your move.</p>`;
+      else if (e.mine && !e.cls) msg.innerHTML = `<p class="an-line"><b>${esc(e.move.san)}</b></p><p class="an-sub2">The engine could not rate this move.</p>`;
+      else if (!e.move) msg.innerHTML = '<p class="an-line">Start position</p><p class="an-sub2">Use ◀ ▶ or your arrow keys to step through the game, or move a piece to try your own move.</p>';
       else {
-        const m = game.moves[ply - 1], c = CLASS_BY_ID[r.cls[ply - 1].cls];
-        const bestUci = evals[ply - 1].lines[0]?.pv?.[0];
-        const bestSan = bestUci ? sanFor(fens[ply - 1], bestUci) : null;
-        const num = `${Math.ceil(ply / 2)}${m.color === 'w' ? '.' : '...'}`;
+        const c = CLASS_BY_ID[e.cls];
+        const bestSan = bestUci ? sanFor(e.prevFen, bestUci) : null;
+        const num = e.mine ? '' : `${Math.ceil(ply / 2)}${e.move.color === 'w' ? '.' : '...'} `;
         let extra = '';
-        if (['inaccuracy', 'mistake', 'blunder', 'okay', 'excellent'].includes(c.id) && bestSan && bestUci !== m.uci) extra = `Best was <b>${esc(bestSan)}</b>.`;
-        else if (c.id === 'theory') extra = esc(r.names[ply - 1] || 'Opening book move.');
+        if (['inaccuracy', 'mistake', 'blunder', 'okay', 'excellent'].includes(c.id) && bestSan && bestUci !== e.move.uci) extra = `Best was <b>${esc(bestSan)}</b>.`;
+        else if (c.id === 'theory') extra = esc(e.name || 'Opening book move.');
         else if (c.id === 'critical') extra = 'The only move that keeps the position under control.';
         else if (c.id === 'brilliant') extra = 'A sacrifice that pays off.';
         else if (c.id === 'best') extra = 'The engine’s top choice.';
-        msg.innerHTML = `<p class="an-line"><i class="an-ic" style="background:${c.color}">${c.glyph}</i><b>${num} ${esc(m.san)}</b> <span style="color:${c.color}">${PHRASE[c.id]}</span></p><p class="an-sub2">${extra} <span class="an-ev">Eval ${evalText(evals[ply].lines[0])}</span></p>`;
+        msg.innerHTML = `<p class="an-line">${badge(c.id, '30px')}<span>${e.mine ? '<span class="an-try">Your move</span> ' : ''}<b>${num}${esc(e.move.san)}</b> <span style="color:${c.color}">${PHRASE[c.id]}</span></span></p><p class="an-sub2">${extra} <span class="an-ev">Eval ${evalText(e.ev.lines[0])}</span></p>`;
       }
-      // opening name
-      const nm = ply > 0 ? r.names[ply - 1] : null;
+      // opening name, move list, graph marker
+      const nm = e.name || null;
       $('#an-open').textContent = nm || '';
       $('#an-open').hidden = !nm;
-      // list + graph marker
-      root.querySelectorAll('.an-mv').forEach((b) => b.classList.toggle('cur', +b.dataset.ply === ply));
-      const cur = root.querySelector('.an-mv.cur'), box = $('#an-list');
+      myRoot.querySelectorAll('.an-mv').forEach((b) => b.classList.toggle('cur', !vars.length && +b.dataset.ply === ply));
+      const cur = myRoot.querySelector('.an-mv.cur'), box = $('#an-list');
       if (cur) { const t = cur.offsetTop - box.offsetTop; if (t < box.scrollTop || t + cur.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = t - box.clientHeight / 2; }
       const gl = $('#an-gline');
       gl.setAttribute('x1', pts[ply][0]); gl.setAttribute('x2', pts[ply][0]);
-      root.querySelectorAll('[data-nav]').forEach((b) => {
-        if (b.dataset.nav === 'start' || b.dataset.nav === 'prev') b.disabled = ply === 0;
-        if (b.dataset.nav === 'end' || b.dataset.nav === 'next') b.disabled = ply === n;
+      // your tried moves
+      const vb = $('#an-var');
+      vb.hidden = !vars.length;
+      if (vars.length) {
+        vb.innerHTML = `<span class="an-varlabel">Your moves</span>${vars.map((v, i) => `<button type="button" class="an-chip${i + 1 === vi ? ' cur' : ''}" data-vi="${i + 1}">${v.cls ? badge(v.cls, '18px') : '<span class="an-spin sm"></span>'}${esc(v.move.san)}</button>`).join('')}<button type="button" class="btn ghost sm" data-back>Back to the game</button>`;
+      }
+      myRoot.querySelectorAll('[data-nav]').forEach((b) => {
+        const a = b.dataset.nav;
+        if (a === 'start') b.disabled = ply === 0 && !vars.length;
+        if (a === 'prev') b.disabled = ply === 0 && vi === 0;
+        if (a === 'next') b.disabled = vars.length ? vi >= vars.length : ply === n;
+        if (a === 'end') b.disabled = ply === n && !vars.length;
       });
+      animate(pairs);
     }
-    function go(p) { ply = Math.max(0, Math.min(n, p)); render(); }
 
-    root.querySelector('.an-nav').addEventListener('click', (e) => {
+    function go(p, anim = true) {
+      p = Math.max(0, Math.min(n, p));
+      const dir = p - ply, hadVars = vars.length > 0;
+      const prevPly = ply;
+      vars = []; vi = 0; sel = null; targets = new Map(); ply = p;
+      render(anim && !hadVars && Math.abs(dir) === 1 ? pairsOf(dir > 0 ? game.moves[p - 1] : game.moves[prevPly - 1], dir < 0) : null);
+    }
+    function stepVar(d) {
+      const nv = vi + d;
+      if (nv < 0 || nv > vars.length) return;
+      const m = vars[(d > 0 ? nv : vi) - 1]?.move;
+      vi = nv; sel = null; targets = new Map();
+      render(m ? pairsOf(m, d < 0) : null);
+    }
+    const prev = () => { if (vi > 0) stepVar(-1); else if (ply > 0) go(ply - 1); };
+    const next = () => { if (vars.length) stepVar(1); else go(ply + 1); };
+
+    // ----- trying your own move -----
+    const askPromotion = (color) => new Promise((resolve) => {
+      const box = document.createElement('div');
+      box.className = 'an-promo';
+      box.innerHTML = ['q', 'r', 'b', 'n'].map((t) => `<button type="button" data-t="${t}"><img src="${PNG(color, t)}" alt="${t}"></button>`).join('');
+      let m;
+      box.addEventListener('click', (e) => { const t = e.target.closest('[data-t]')?.dataset.t; if (t) { m.close(); resolve(t); } });
+      m = modal({ title: 'Promote to', content: box, actions: [{ label: 'Cancel', run: () => resolve(null) }] });
+    });
+
+    async function tryMove(from, to, dragged = false) {
+      const c = new Chess(entry().fen);
+      const t = targets.get(to);
+      if (!t) return;
+      let promo;
+      if (t.promo) { promo = await askPromotion(c.turn()); if (!promo) { sel = null; targets = new Map(); render(); return; } }
+      let mv;
+      try { mv = c.move({ from, to, promotion: promo }); } catch { return; }
+      const m = { san: mv.san, uci: from + to + (promo || ''), color: mv.color, from, to, piece: mv.piece, captured: mv.captured || null };
+      sel = null; targets = new Map();
+      if (vi === 0 && ply < n && game.moves[ply].uci === m.uci) { go(ply + 1, !dragged); return; }   // that is the move from the game
+      if (vi < vars.length && vars[vi].move.uci === m.uci) { vi++; render(dragged ? null : pairsOf(m, false)); return; }
+      vars = vars.slice(0, vi);
+      const v = { fen: c.fen(), move: m, ev: null, cls: null, name: null };
+      const before = vi === 0 ? { fen: fens[ply], ev: evals[ply] } : vars[vi - 1];
+      vars.push(v); vi = vars.length;
+      render(dragged ? null : pairsOf(m, false));
+      try {
+        const e = await getEng();
+        v.ev = await queue(() => evalFen(e, v.fen, tryOpts));
+        const th = opts.book ? bookName(book, v.fen) : null;
+        const res = classifyMove({ fenBefore: before.fen, move: m, evBefore: before.ev, evAfter: v.ev, theory: !!th, opts });
+        v.cls = res.cls; v.name = th;
+      } catch { v.ev = before.ev; v.err = true; }
+      if (myRoot.isConnected && vars.includes(v)) render();
+    }
+
+    const board = $('#an-board');
+    board.addEventListener('pointerdown', (ev) => {
+      const sqEl = ev.target.closest('.sq');
+      if (!sqEl || ev.button) return;
+      const cur = entry();
+      if (cur.pending) return;                                  // wait for the rating of the last move
+      const name = sqEl.dataset.sq;
+      if (sel && targets.has(name)) { tryMove(sel, name); return; }
+      const c = new Chess(cur.fen);
+      const p = c.get(name);
+      if (p && p.color === c.turn() && !c.isGameOver()) {
+        sel = name; targets = legalTargets(cur.fen, name);
+        drag = { from: name, color: p.color, type: p.type, moved: false, x: ev.clientX, y: ev.clientY, size: sqEl.offsetWidth, img: null };
+        render();
+        const move = (e) => {
+          if (!drag) return;
+          if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+          if (!drag.moved) {
+            drag.moved = true;
+            const g = new Image(); g.src = PNG(drag.color, drag.type); g.className = 'an-ghost'; g.style.width = g.style.height = `${drag.size}px`;
+            document.body.append(g); drag.img = g;
+            const o = sqEls[drag.from]?.querySelector('img.pc'); if (o) o.style.opacity = '.35';
+          }
+          drag.img.style.left = `${e.clientX - drag.size / 2}px`; drag.img.style.top = `${e.clientY - drag.size / 2}px`;
+        };
+        const up = (e) => {
+          document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+          const d = drag; drag = null;
+          d?.img?.remove();
+          if (!d || !d.moved) return;
+          const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.sq')?.dataset.sq;
+          if (over && over !== d.from && targets.has(over)) tryMove(d.from, over, true);
+          else render();
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+      } else { sel = null; targets = new Map(); render(); }
+    });
+
+    myRoot.querySelector('.an-nav').addEventListener('click', (e) => {
       const a = e.target.closest('[data-nav]')?.dataset.nav;
-      if (a === 'start') go(0); else if (a === 'prev') go(ply - 1); else if (a === 'next') go(ply + 1); else if (a === 'end') go(n);
+      if (a === 'start') go(0); else if (a === 'prev') prev(); else if (a === 'next') next(); else if (a === 'end') go(n);
       else if (a === 'flip') { flip = !flip; render(); }
+    });
+    $('#an-var').addEventListener('click', (e) => {
+      if (e.target.closest('[data-back]')) { go(ply, false); return; }
+      const c = e.target.closest('[data-vi]');
+      if (c) { vi = +c.dataset.vi; sel = null; targets = new Map(); render(); }
     });
     $('#an-list').addEventListener('click', (e) => { const b = e.target.closest('.an-mv'); if (b) go(+b.dataset.ply); });
     $('#an-new').onclick = () => showSetup(pgn);
-    const myRoot = root;
     keyHandler = (e) => {
       if (!myRoot.isConnected) { document.removeEventListener('keydown', keyHandler); return; }
-      if (e.target.closest?.('input,textarea,select')) return;
-      if (e.key === 'ArrowLeft') { go(ply - 1); e.preventDefault(); }
-      else if (e.key === 'ArrowRight') { go(ply + 1); e.preventDefault(); }
+      if (e.target.closest?.('input,textarea,select') || document.querySelector('.modal')) return;
+      if (e.key === 'ArrowLeft') { prev(); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { next(); e.preventDefault(); }
       else if (e.key === 'Home') { go(0); e.preventDefault(); }
       else if (e.key === 'End') { go(n); e.preventDefault(); }
       else if (e.key === 'f') { flip = !flip; render(); }
+      else if (e.key === 'Escape') { sel = null; targets = new Map(); render(); }
     };
     document.addEventListener('keydown', keyHandler);
     // open on the last position, from the point of view of the human player when we know it

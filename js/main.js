@@ -49,7 +49,7 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 function route() {
   const parts = (location.hash.replace('#/', '') || 'home').split('?')[0].split('/');
   const name = parts[0];
-  const pages = { home, play, settings: settingsPage, create: () => createPage(view, parts.slice(1)), analyze: () => analyzePage(view, { store, history }) };
+  const pages = { home, play, settings: settingsPage, create: () => createPage(view, parts.slice(1)), analyze: () => analyzePage(view, { store, history, settings }) };
   const page = pages[name] ? name : 'home';
   document.querySelectorAll('.sidebar a[data-route]').forEach((a) => {
     const on = a.dataset.route === page;
@@ -443,7 +443,7 @@ function settingsPage() {
         ${gameplay.map(([k, t, d]) => toggle(k, t, d)).join('')}
       </section>
 
-      <p class="foot">Boardly 2026. Made by Claude. v3.0</p>
+      <p class="foot">Boardly 2026. Made by Claude. v3.1</p>
     </div>`;
 
   view.querySelector('#s-name').addEventListener('input', (e) => { settings.name = e.target.value.trim(); saveSettings(); });
